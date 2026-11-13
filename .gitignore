@@ -1,0 +1,17 @@
+# Test binaries and coverage profiles
+*.test
+*.out
+/coverage.*
+
+# A go.work is a local setup, never part of the module.
+go.work
+go.work.sum
+
+# Local secrets
+.env
+.env.*
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
