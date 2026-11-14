@@ -1,6 +1,7 @@
 package flashpi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -297,8 +298,9 @@ func parseProblem(body []byte) *ProblemDetails {
 	if json.Unmarshal(body, &members) != nil || members == nil {
 		return nil
 	}
+	// The code must be a string ("" included): null is not one.
 	var code string
-	if json.Unmarshal(members["code"], &code) != nil {
+	if raw := bytes.TrimSpace(members["code"]); len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &code) != nil {
 		return nil
 	}
 	problem := new(ProblemDetails)

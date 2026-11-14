@@ -73,6 +73,7 @@ func TestAnAPIErrorWithoutProblemDetails(t *testing.T) {
 		{"<html>\n  <b>Bad   gateway</b>\n</html>", "502 <html> <b>Bad gateway</b> </html>"},
 		{`{"message":"no code"}`, `502 {"message":"no code"}`},
 		{`{"code":42}`, `502 {"code":42}`},
+		{`{"code":null,"detail":"bad gateway"}`, `502 {"code":null,"detail":"bad gateway"}`},
 		{`["code"]`, `502 ["code"]`},
 		{strings.Repeat("ñ", 300), "502 " + strings.Repeat("ñ", 200)},
 		{"bad \xff byte", "502 bad � byte"},
@@ -220,5 +221,22 @@ func TestAProblemSurvivesJSON(t *testing.T) {
 	data, _ = json.Marshal(problem)
 	if !strings.Contains(string(data), `"code":"rate_limited"`) {
 		t.Errorf("Extra replaced a declared member: %s", data)
+	}
+}
+
+func TestAProxyErrorWithANullCodeLeavesTheAnswerUnanswered(t *testing.T) {
+	// The 502 without Problem Details means the POST may have reached the API, so the 409s are
+	// its own attempt, waited for without spending retries.
+	client, transport, _ := testClient(t,
+		respond(502, `{"code":null}`),
+		problem(409, "idempotency_key_in_progress"),
+		problem(409, "idempotency_key_in_progress"),
+		respond(201, documentJSON("doc-1")),
+	)
+	if _, err := client.Invoices.Create(context.Background(), invoiceBody); err != nil || len(transport.all()) != 4 {
+		t.Errorf("got %v after %d requests", err, len(transport.all()))
+	}
+	if problem := parseProblem([]byte(`{"code":""}`)); problem == nil {
+		t.Error("an empty code is still a code")
 	}
 }
