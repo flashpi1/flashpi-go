@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -253,6 +254,17 @@ func (g *generator) classify() (map[string]direction, error) {
 		}
 	}
 	return result, nil
+}
+
+// wireName is what a member or a query parameter may be called: it is written into struct tags
+// and string literals, so a name that could end them (a backtick, a quote, a comma) is refused.
+var wireName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+
+func checkWireName(name string) error {
+	if !wireName.MatchString(name) {
+		return fmt.Errorf("the name %q has characters other than letters, digits, _, . and -", name)
+	}
+	return nil
 }
 
 func isMethod(key string) bool {
@@ -572,6 +584,9 @@ func (g *generator) object(name string, schema *node, where string, dir directio
 	}
 	seen := map[string]string{}
 	for _, property := range properties.entries() {
+		if err := checkWireName(property.key); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
 		fieldName, err := goName(property.key)
 		if err != nil {
 			return fmt.Errorf("%s.%s: %w", where, property.key, err)
@@ -688,6 +703,9 @@ func (g *generator) union(name string, schema *node, where string) error {
 	property := discriminator.get("propertyName").str()
 	if property == "" {
 		return fmt.Errorf("%s: a oneOf needs a discriminator.propertyName", where)
+	}
+	if err := checkWireName(property); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
 	}
 	def := &definition{name: name, doc: describe(schema), union: &unionDef{discriminant: property, byValue: map[string]string{}}}
 	referenced := map[string]bool{}
@@ -809,6 +827,9 @@ func (g *generator) queries() error {
 				}
 				key := parameter.get("name").str()
 				where := operationID + "." + key
+				if err := checkWireName(key); err != nil {
+					return fmt.Errorf("%s: %w", operationID, err)
+				}
 				if parameter.get("required") != nil && parameter.get("required").boolean {
 					return fmt.Errorf("%s: required query parameters are not supported", where)
 				}
