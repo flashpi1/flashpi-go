@@ -5,3 +5,5 @@
 openapi/openapi.json linguist-generated
 # Generated from that copy (`go run ./internal/cmd/openapi generate`).
 types.gen.go linguist-generated
+# Extracted from the READMEs (`go run ./internal/cmd/readme generate`).
+internal/readme/*/block* linguist-generated
