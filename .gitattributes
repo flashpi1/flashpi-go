@@ -7,3 +7,4 @@ openapi/openapi.json linguist-generated
 types.gen.go linguist-generated
 # Extracted from the READMEs (`go run ./internal/cmd/readme generate`).
 internal/readme/*/block* linguist-generated
+internal/readme/*/block*/** linguist-generated
