@@ -32,7 +32,9 @@ type Error struct {
 	IdempotencyKey string
 
 	// Err is the cause, if any: context.Canceled or context.DeadlineExceeded when the call's
-	// context ended, or the error of decoding an answer.
+	// context ended, or the error of decoding an answer. An attempt that ran out of its own time
+	// (a *TimeoutError, read as an *Error) wraps context.DeadlineExceeded too, as net/http's
+	// timeouts do: check for *TimeoutError, or ctx.Err(), first to tell them apart.
 	Err error
 }
 
@@ -165,7 +167,8 @@ type RateLimitError struct{ *APIError }
 func (e *RateLimitError) Unwrap() error { return e.APIError }
 
 // InternalServerError is a 5xx: Flashpi failed to answer. Requests are retried automatically
-// before it is returned.
+// before it is returned, except a 501, a 503 demo_issuer_unavailable and one that asks to wait
+// (Retry-After) more than 60 seconds.
 type InternalServerError struct{ *APIError }
 
 // Unwrap returns the APIError.
@@ -224,7 +227,8 @@ const (
 )
 
 // WebhookVerificationError means a webhook did not come from Flashpi, was altered, or is too
-// old: answer 400 and ignore it.
+// old: answer 400 and ignore it. With the reason WebhookInvalidSecret the secret you passed is
+// empty or not a whsec_ secret: that is your configuration, so log it and answer 500.
 type WebhookVerificationError struct {
 	// Reason says why it was rejected.
 	Reason WebhookVerificationReason

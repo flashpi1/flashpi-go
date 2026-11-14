@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 )
 
-// Nullable is an optional member of a request that may also be sent as null, which clears the
-// field in an update (PATCH). Its zero value is not sent at all:
+// Nullable is an optional member of a request that may also be sent as null: in an update
+// (PATCH), null clears the field; in a create, it means none. Its zero value is not sent at all:
 //
 //	flashpi.UpdateIssuer{
 //		TradeName: flashpi.Null[string](),              // clears the trade name

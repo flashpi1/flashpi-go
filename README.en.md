@@ -76,7 +76,8 @@ func main() {
 ```
 
 Requests and answers are structs with the API's fields (`invoice.AccessKey` is `accessKey`).
-Optional fields are pointers: `new("value")` makes one. Amounts and quantities are **strings**
+Optional fields are pointers: `new("value")` makes one (the ones that accept `null` are
+`flashpi.Nullable`, below). Amounts and quantities are **strings**
 (`"1.15"`), never numbers, so no decimals are lost.
 
 With the **demo issuer** you can issue test documents without uploading a certificate: its id is
@@ -164,11 +165,14 @@ if err != nil {
 }
 ```
 
-Filters use the API's names (`IssueDateFrom`, `IssuerID`), and `nil` means no filters.
+Filters use the API's names (`IssueDateFrom`, `IssuerID`), and `nil` means no filters. `Limit`
+is the size of each page: `List` walks every page, so `break` out of the loop once you have what
+you need.
 
 ## Errors
 
-Every error of the API is a `*flashpi.APIError`, wrapped in a type for its HTTP status. Check it
+Every error of the API is a `*flashpi.APIError`, wrapped in a type of its own when its HTTP status
+has one (the ones in the table; others, such as 405 or 413, come as a `*flashpi.APIError`). Check it
 with `errors.As` and branch on `Code`, which is stable and in English; `Message` follows the
 requested language.
 
@@ -208,9 +212,10 @@ messages in Spanish: `flashpi.NewClient(flashpi.WithLanguage(flashpi.LanguageSpa
 
 ## Retries and idempotency
 
-The SDK retries network errors, timeouts, and 408, 429 (when asked to wait 60 s or less) and
-5xx answers up to 2 times, with growing waits. Every POST carries an `Idempotency-Key` that its
-retries repeat, so the API never issues twice:
+The SDK retries network errors, timeouts, and 408, 429 and 5xx answers up to 2 times, with
+growing waits, except a 501, a 503 `demo_issuer_unavailable` and answers that ask to wait
+(`Retry-After`) more than 60 s; it also retries a 409 `idempotency_key_in_progress`. Every POST
+carries an `Idempotency-Key` that its retries repeat, so the API never issues twice:
 
 - When a retry finds that the first attempt did create the document, the SDK returns that
   document.
@@ -243,7 +248,9 @@ if errors.As(err, &flashpiErr) && flashpiErr.IdempotencyKey != "" {
 
 The `ctx` bounds the whole call, retries included. When it is cancelled or its deadline passes,
 the call stops without retrying and returns a `*flashpi.Error` with its key, for which
-`errors.Is(err, context.Canceled)` (or `context.DeadlineExceeded`) is true.
+`errors.Is(err, context.Canceled)` (or `context.DeadlineExceeded`) is true. An attempt that runs
+out of its own time (`flashpi.WithTimeout`) matches `context.DeadlineExceeded` too, as in
+`net/http`: check `*flashpi.TimeoutError` or `ctx.Err()` first to tell them apart.
 
 Daily limits (such as the demo issuer's quota) are not retried: they come as a
 `*flashpi.RateLimitError`, whose `RetryAfter()` says how long to wait.
@@ -274,18 +281,24 @@ func main() {
 }
 
 func flashpiWebhook(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	// The body arrives before the signature is checked: limit its size.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		return
 	}
 	event, err := flashpi.UnwrapWebhook(body, r.Header, os.Getenv("FLASHPI_WEBHOOK_SECRET"))
 	var invalid *flashpi.WebhookVerificationError
-	if errors.As(err, &invalid) {
+	switch {
+	case errors.As(err, &invalid) && invalid.Reason == flashpi.WebhookInvalidSecret:
+		// An empty or mistyped secret is your configuration, not a forged webhook.
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case errors.As(err, &invalid):
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
-	if err != nil {
+	case err != nil:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -308,7 +321,9 @@ func flashpiWebhook(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-With Gin, Echo, chi or Fiber, pass the raw body and the request's headers the same way.
+With Gin, Echo, chi or Fiber, pass the raw body and the request's headers the same way. Answer 400
+to a webhook that fails verification, except `WebhookInvalidSecret`: that is your secret, not the
+webhook, so log it and answer 500 (Flashpi will retry).
 
 Store `event.Info().ID` and skip repeats: an event can arrive more than once. During a secret
 rotation Flashpi signs with both the new and the previous secret, so either works. If the
@@ -359,7 +374,10 @@ if onboarding.ExistingIssuer != nil {
 		issuer.LegalName = cmp.Or(prefill.LegalName, issuer.LegalName)
 		issuer.HeadOfficeAddress = cmp.Or(prefill.HeadOfficeAddress, issuer.HeadOfficeAddress)
 		issuer.TaxProfile.KeepsAccounting = prefill.TaxProfile.KeepsAccounting != nil && *prefill.TaxProfile.KeepsAccounting
-		// For RIMPE, a special taxpayer or a withholding agent, add that data.
+		if regime := prefill.TaxProfile.RIMPERegime; regime != nil && *regime != flashpi.IssuerOnboardingPrefillTaxProfileRIMPERegimeGeneral {
+			issuer.TaxProfile.RIMPERegime = flashpi.NullableOf(flashpi.RIMPERegime(*regime))
+		}
+		// For a special taxpayer or a withholding agent, add their resolution numbers.
 	}
 	completed, err = client.IssuerOnboardings.Complete(ctx, onboarding.ID, &issuer)
 }
@@ -386,9 +404,11 @@ instead, uploads a certificate for the mode of the key you use only (test or liv
 
 ## Optional fields and null
 
-Optional fields are pointers (`nil` is not sent) and `new(value)` makes them. In updates, the
-fields you can clear are `flashpi.Nullable`: `flashpi.Null` sends `null` (clears the field),
-`flashpi.NullableOf` sends a value, and an unset one is not sent.
+Optional fields are pointers (`nil` is not sent) and `new(value)` makes them. The fields a request
+may send as `null` are `flashpi.Nullable`: `flashpi.Null` sends `null` (in an update, it clears the
+field), `flashpi.NullableOf` sends a value, and an unset one is not sent. They are in updates and
+in some creates too, such as the tax profile's `RIMPERegime` or a webhook endpoint's
+`Description`.
 
 ```go
 _, err := client.Issuers.Update(ctx, issuerID, flashpi.UpdateIssuer{

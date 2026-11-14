@@ -7,7 +7,8 @@ before changing them.
 ## Setup
 
 Go 1.26 or later. The module has no dependencies; staticcheck lives in a module of its own,
-`internal/tools`, so it never becomes a requirement of the SDK.
+`internal/tools` (its `tools.go` makes it a direct requirement, so Dependabot updates it), so it
+never becomes a requirement of the SDK.
 
 ## Checks
 
@@ -80,7 +81,9 @@ Commit with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:
 [release-please](https://github.com/googleapis/release-please) keeps a release pull request
 open, and merging it tags the version (`vX.Y.Z`) and creates the GitHub release. release-please
 writes the version to `CHANGELOG.md`, `.release-please-manifest.json` and the `Version`
-constant of `version.go` (sent in the User-Agent); the Go release type needs no other file.
+constant of `version.go` (sent in the User-Agent; its `x-release-please-version` marker points
+release-please at it), and `version_test.go` checks the last two agree. The Go release type needs
+no other file.
 
 There is no publish step: the Go module proxy (proxy.golang.org) serves a version from its tag
 the first time someone asks for it, and pkg.go.dev lists it after that. A published version

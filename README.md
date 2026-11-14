@@ -76,7 +76,8 @@ func main() {
 ```
 
 Las peticiones y las respuestas son structs con los campos de la API (`invoice.AccessKey` es
-`accessKey`). Los campos opcionales son punteros: `new("valor")` los crea. Los montos y
+`accessKey`). Los campos opcionales son punteros: `new("valor")` los crea (los que aceptan `null`
+son `flashpi.Nullable`, más abajo). Los montos y
 cantidades son **textos** (`"1.15"`), nunca números, para no perder decimales.
 
 Con el **emisor demo** puedes emitir en pruebas sin subir un certificado: su id está en el
@@ -165,13 +166,14 @@ if err != nil {
 ```
 
 Los filtros usan los nombres de la API (`IssueDateFrom`, `IssuerID`), y `nil` significa sin
-filtros.
+filtros. `Limit` es el tamaño de cada página: `List` recorre todas, así que sal del `for` con
+`break` cuando tengas lo que buscabas.
 
 ## Errores
 
-Cada error de la API es un `*flashpi.APIError`, envuelto en un tipo según su estado HTTP. Revísalo
-con `errors.As` y decide según `Code`, que es estable y en inglés; `Message` sigue el idioma
-pedido.
+Cada error de la API es un `*flashpi.APIError`, envuelto en un tipo propio cuando su estado HTTP lo
+tiene (los de la tabla; los demás, como 405 o 413, llegan como `*flashpi.APIError`). Revísalo con
+`errors.As` y decide según `Code`, que es estable y en inglés; `Message` sigue el idioma pedido.
 
 ```go
 _, err := client.Invoices.Create(ctx, body)
@@ -209,8 +211,10 @@ mensajes en español: `flashpi.NewClient(flashpi.WithLanguage(flashpi.LanguageSp
 
 ## Reintentos e idempotencia
 
-El SDK reintenta hasta 2 veces, con espera creciente, los errores de red, los tiempos agotados,
-las respuestas 408, 429 (si piden esperar 60 s o menos) y 5xx. Cada POST lleva un
+El SDK reintenta hasta 2 veces, con espera creciente, los errores de red, los tiempos agotados y
+las respuestas 408, 429 y 5xx, salvo un 501, un 503 `demo_issuer_unavailable` y las que piden
+esperar (`Retry-After`) más de 60 s; también reintenta un 409 `idempotency_key_in_progress`. Cada
+POST lleva un
 `Idempotency-Key` que se repite en sus reintentos, así que la API nunca emite dos veces:
 
 - Si un reintento descubre que el primer intento sí creó el documento, el SDK devuelve ese
@@ -244,7 +248,9 @@ if errors.As(err, &flashpiErr) && flashpiErr.IdempotencyKey != "" {
 
 El `ctx` limita la llamada entera, reintentos incluidos. Si se cancela o vence, la llamada se
 detiene sin reintentar y devuelve un `*flashpi.Error` con su clave, con el que
-`errors.Is(err, context.Canceled)` (o `context.DeadlineExceeded`) es verdadero.
+`errors.Is(err, context.Canceled)` (o `context.DeadlineExceeded`) es verdadero. Un intento que
+agota su propio plazo (`flashpi.WithTimeout`) también cumple `context.DeadlineExceeded`, como en
+`net/http`: revisa primero `*flashpi.TimeoutError` o `ctx.Err()` para distinguirlos.
 
 Los límites diarios (como la cuota del emisor demo) no se reintentan: llegan como
 `*flashpi.RateLimitError`, y su `RetryAfter()` dice cuánto esperar.
@@ -275,18 +281,24 @@ func main() {
 }
 
 func flashpiWebhook(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	// El cuerpo llega antes de verificar la firma: limita su tamaño.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		return
 	}
 	event, err := flashpi.UnwrapWebhook(body, r.Header, os.Getenv("FLASHPI_WEBHOOK_SECRET"))
 	var invalid *flashpi.WebhookVerificationError
-	if errors.As(err, &invalid) {
+	switch {
+	case errors.As(err, &invalid) && invalid.Reason == flashpi.WebhookInvalidSecret:
+		// Un secreto vacío o mal copiado es tu configuración, no un webhook falso.
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case errors.As(err, &invalid):
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
-	if err != nil {
+	case err != nil:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -309,7 +321,9 @@ func flashpiWebhook(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Con Gin, Echo, chi o Fiber pasa igual el cuerpo crudo y las cabeceras de la petición.
+Con Gin, Echo, chi o Fiber pasa igual el cuerpo crudo y las cabeceras de la petición. Responde 400
+a un webhook que no pasa la verificación, salvo `WebhookInvalidSecret`: ese es tu secreto, no el
+webhook, así que regístralo y responde 500 (Flashpi lo reintentará).
 
 Guarda `event.Info().ID` y descarta los repetidos: un evento puede llegar más de una vez. Durante
 una rotación del secreto, Flashpi firma con el nuevo y el anterior, así que cualquiera de los dos
@@ -360,7 +374,10 @@ if onboarding.ExistingIssuer != nil {
 		issuer.LegalName = cmp.Or(prefill.LegalName, issuer.LegalName)
 		issuer.HeadOfficeAddress = cmp.Or(prefill.HeadOfficeAddress, issuer.HeadOfficeAddress)
 		issuer.TaxProfile.KeepsAccounting = prefill.TaxProfile.KeepsAccounting != nil && *prefill.TaxProfile.KeepsAccounting
-		// Si es RIMPE, contribuyente especial o agente de retención, agrega esos datos.
+		if regime := prefill.TaxProfile.RIMPERegime; regime != nil && *regime != flashpi.IssuerOnboardingPrefillTaxProfileRIMPERegimeGeneral {
+			issuer.TaxProfile.RIMPERegime = flashpi.NullableOf(flashpi.RIMPERegime(*regime))
+		}
+		// Si es contribuyente especial o agente de retención, agrega sus resoluciones.
 	}
 	completed, err = client.IssuerOnboardings.Complete(ctx, onboarding.ID, &issuer)
 }
@@ -387,9 +404,11 @@ certificado solo para el modo de la clave que usas (pruebas o producción).
 
 ## Campos opcionales y null
 
-Los campos opcionales son punteros (`nil` no se envía) y `new(valor)` los crea. En las
-actualizaciones, los campos que se pueden borrar son `flashpi.Nullable`: `flashpi.Null` envía
-`null` (borra el campo), `flashpi.NullableOf` envía un valor y sin asignar no se envía.
+Los campos opcionales son punteros (`nil` no se envía) y `new(valor)` los crea. Los campos que una
+petición puede enviar como `null` son `flashpi.Nullable`: `flashpi.Null` envía `null` (en una
+actualización, borra el campo), `flashpi.NullableOf` envía un valor y sin asignar no se envía.
+Están en las actualizaciones y también en algunas creaciones, como `RIMPERegime` del perfil
+tributario o `Description` de un endpoint de webhooks.
 
 ```go
 _, err := client.Issuers.Update(ctx, issuerID, flashpi.UpdateIssuer{

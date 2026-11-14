@@ -20,18 +20,24 @@ func main() {
 }
 
 func flashpiWebhook(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	// The body arrives before the signature is checked: limit its size.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		return
 	}
 	event, err := flashpi.UnwrapWebhook(body, r.Header, os.Getenv("FLASHPI_WEBHOOK_SECRET"))
 	var invalid *flashpi.WebhookVerificationError
-	if errors.As(err, &invalid) {
+	switch {
+	case errors.As(err, &invalid) && invalid.Reason == flashpi.WebhookInvalidSecret:
+		// An empty or mistyped secret is your configuration, not a forged webhook.
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case errors.As(err, &invalid):
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
-	if err != nil {
+	case err != nil:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

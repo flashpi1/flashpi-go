@@ -97,8 +97,11 @@ func WithTimeout(timeout time.Duration) Option {
 	return option(func(s *commonSettings) { s.timeout = &timeout })
 }
 
-// WithMaxRetries sets how many times a request is retried after a network error, a timeout, a
-// 408, a 429 or a 5xx (default 2; 0 turns retries off).
+// WithMaxRetries sets how many times a request is retried (default 2; 0 turns retries off).
+// Retried: network errors, timeouts, 408, 429 and 5xx, except a 501, a 503
+// demo_issuer_unavailable and answers that ask to wait (Retry-After) more than 60 seconds, and a
+// 409 idempotency_key_in_progress. POSTs keep their Idempotency-Key, so a retry never issues
+// twice.
 func WithMaxRetries(retries int) Option {
 	return option(func(s *commonSettings) { s.maxRetries = &retries })
 }

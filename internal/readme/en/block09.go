@@ -49,7 +49,10 @@ func Block09() error {
 			issuer.LegalName = cmp.Or(prefill.LegalName, issuer.LegalName)
 			issuer.HeadOfficeAddress = cmp.Or(prefill.HeadOfficeAddress, issuer.HeadOfficeAddress)
 			issuer.TaxProfile.KeepsAccounting = prefill.TaxProfile.KeepsAccounting != nil && *prefill.TaxProfile.KeepsAccounting
-			// For RIMPE, a special taxpayer or a withholding agent, add that data.
+			if regime := prefill.TaxProfile.RIMPERegime; regime != nil && *regime != flashpi.IssuerOnboardingPrefillTaxProfileRIMPERegimeGeneral {
+				issuer.TaxProfile.RIMPERegime = flashpi.NullableOf(flashpi.RIMPERegime(*regime))
+			}
+			// For a special taxpayer or a withholding agent, add their resolution numbers.
 		}
 		completed, err = client.IssuerOnboardings.Complete(ctx, onboarding.ID, &issuer)
 	}
