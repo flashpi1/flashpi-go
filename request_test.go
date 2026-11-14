@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -784,8 +785,17 @@ func TestBodyTextThatIsNotUTF8IsRefused(t *testing.T) {
 	if _, err := encodeJSON(json.RawMessage("\"\xff\"")); err == nil {
 		t.Error("raw JSON that is not UTF-8 was accepted")
 	}
-	if _, err := encodeJSON(json.RawMessage(`"\ufffd"`)); err == nil {
-		t.Error("an escaped replacement character was accepted")
+	for _, invalid := range []any{
+		[]any{map[string]any{"deep": []string{"ok", "\xc3"}}},
+		&struct{ Inner *string }{Inner: ptr("\xe2\x82")},
+		[2]string{"ok", "\x80"},
+	} {
+		if _, err := encodeJSON(invalid); err == nil {
+			t.Errorf("%#v was accepted", invalid)
+		}
+	}
+	if !validText(reflect.ValueOf(map[string][]byte{"bytes": {0xff}}), 0) {
+		t.Error("bytes, sent as base64, were refused")
 	}
 }
 

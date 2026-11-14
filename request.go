@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -516,33 +517,57 @@ func encodeJSON(body any) ([]byte, error) {
 	if err != nil {
 		return nil, &Error{Message: "The request body cannot be sent as JSON: " + err.Error(), Err: err}
 	}
-	// encoding/json replaces each byte that is not UTF-8 with the escape \ufffd (and writes a
-	// real U+FFFD as it is), and passes a json.RawMessage through: either way the text would
-	// reach the SRI altered, so it is refused, as in headers.
-	if !utf8.Valid(content) || hasReplacementEscape(content) {
+	// encoding/json replaces each byte that is not UTF-8 with U+FFFD (Go 1.26 writes it as an
+	// escape, Go 1.27 as the character itself, so the output cannot tell it from a real one) and
+	// passes a json.RawMessage through: either way the text would reach the SRI altered, so it
+	// is refused, as in headers.
+	if !validText(reflect.ValueOf(body), 0) || !utf8.Valid(content) {
 		return nil, &Error{Message: "The request body has text that is not UTF-8"}
 	}
 	return content, nil
 }
 
-// hasReplacementEscape reports whether JSON text holds the escape \ufffd itself, not an
-// escaped backslash followed by the letters ufffd.
-func hasReplacementEscape(content []byte) bool {
-	for index := bytes.Index(content, []byte(`\ufffd`)); index >= 0; {
-		backslashes := 0
-		for i := index; i >= 0 && content[i] == '\\'; i-- {
-			backslashes++
-		}
-		if backslashes%2 == 1 {
-			return true
-		}
-		next := bytes.Index(content[index+1:], []byte(`\ufffd`))
-		if next < 0 {
-			return false
-		}
-		index += 1 + next
+var rawMessageType = reflect.TypeFor[json.RawMessage]()
+
+// validText reports whether every string a value holds (map keys included), and every
+// json.RawMessage, is UTF-8. Unexported fields are read too, such as the value of a Nullable.
+func validText(v reflect.Value, depth int) bool {
+	if depth > 64 {
+		return true // deeper than any body of the API
 	}
-	return false
+	switch v.Kind() {
+	case reflect.String:
+		return utf8.ValidString(v.String())
+	case reflect.Pointer, reflect.Interface:
+		return v.IsNil() || validText(v.Elem(), depth+1)
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if !validText(v.Field(i), depth+1) {
+				return false
+			}
+		}
+	case reflect.Slice:
+		if v.Type() == rawMessageType {
+			return utf8.Valid(v.Bytes())
+		}
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return true // bytes are sent as base64
+		}
+		fallthrough
+	case reflect.Array:
+		for i := range v.Len() {
+			if !validText(v.Index(i), depth+1) {
+				return false
+			}
+		}
+	case reflect.Map:
+		for iterator := v.MapRange(); iterator.Next(); {
+			if !validText(iterator.Key(), depth+1) || !validText(iterator.Value(), depth+1) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // marshalJSON is json.Marshal without HTML escaping (<, > and & stay as they are), as
