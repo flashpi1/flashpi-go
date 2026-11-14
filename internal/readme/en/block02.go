@@ -31,7 +31,7 @@ func Block02() error {
 	}
 
 	// Emails the RIDE and the XML to the buyer again.
-	if _, err := client.Documents.SendEmail(ctx, invoice.ID); err != nil {
+	if _, err := client.Documents.SendEmail(ctx, invoice.ID, nil); err != nil {
 		return err
 	}
 	return nil

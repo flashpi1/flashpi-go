@@ -37,6 +37,11 @@ const (
 
 	codeInProgress = "idempotency_key_in_progress"
 
+	// The most bytes the SDK reads of a successful answer (a RIDE PDF is far smaller) and of an
+	// error answer.
+	maxAnswerBytes      = 64 << 20
+	maxErrorAnswerBytes = 1 << 20
+
 	jsonAccept = "application/json"
 	xmlAccept  = "application/xml, application/problem+json"
 	pdfAccept  = "application/pdf, application/problem+json"
@@ -52,6 +57,11 @@ type engine struct {
 	headers     []header
 	http        *http.Client
 	environment Environment
+
+	// The most bytes the SDK reads of an answer: a larger one fails instead of filling the
+	// memory (a compressed answer can grow a thousand times).
+	maxAnswerBytes      int64
+	maxErrorAnswerBytes int64
 
 	// Replaced by the tests.
 	now    func() time.Time
@@ -372,13 +382,21 @@ func (e *engine) attempt(ctx context.Context, op *operation, c *call) (*answer, 
 		return nil, e.transportError(ctx, attemptCtx, op, c, err)
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(response.Body)
+	success := response.StatusCode >= 200 && response.StatusCode <= 299
+	limit := e.maxAnswerBytes
+	if !success {
+		limit = e.maxErrorAnswerBytes
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
 		return nil, e.transportError(ctx, attemptCtx, op, c, err)
 	}
-	success := response.StatusCode >= 200 && response.StatusCode <= 299
-	// The answer arrived: a body that cannot be decoded is never retried as a lost answer.
-	data, err := decodeBody(response, raw)
+	// The answer arrived: a body that is too large or cannot be decoded is never retried as a
+	// lost answer.
+	data, err := decodeBody(response, raw, limit)
+	if int64(len(raw)) > limit || errors.Is(err, errAnswerTooLarge) {
+		return nil, &Error{Message: fmt.Sprintf("%s %s: the API answered %d with more than %d bytes, the most the SDK reads", op.method, c.url, response.StatusCode, limit)}
+	}
 	if err != nil {
 		if success {
 			return nil, &Error{Message: fmt.Sprintf("%s %s: the API's answer could not be decoded: %v", op.method, c.url, err), Err: err}
@@ -460,9 +478,13 @@ func (e *engine) cancelled(ctx context.Context, op *operation, c *call) error {
 	return &Error{Message: fmt.Sprintf("%s %s: %v", op.method, c.url, cause), Err: cause}
 }
 
+// errAnswerTooLarge is a body that decodes into more than the limit.
+var errAnswerTooLarge = errors.New("the answer is too large")
+
 // decodeBody decodes a body the transport left compressed (a caller that sets its own
-// Accept-Encoding, or an answer without a body that the transport does not decode).
-func decodeBody(response *http.Response, raw []byte) ([]byte, error) {
+// Accept-Encoding, or an answer without a body that the transport does not decode), up to limit
+// bytes.
+func decodeBody(response *http.Response, raw []byte, limit int64) ([]byte, error) {
 	encoding := strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Encoding")))
 	if response.Uncompressed || len(raw) == 0 || encoding == "" || encoding == "identity" {
 		return raw, nil
@@ -481,7 +503,11 @@ func decodeBody(response *http.Response, raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer reader.Close()
-	return io.ReadAll(reader)
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err == nil && int64(len(data)) > limit {
+		return nil, errAnswerTooLarge
+	}
+	return data, err
 }
 
 // encodeJSON is the body of a request: compact UTF-8 JSON, as JSON.stringify writes it.

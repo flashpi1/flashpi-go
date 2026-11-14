@@ -188,7 +188,7 @@ var sdkOperations = map[string]sdkOperation{
 		return c.Documents.PDF(ctx, "id1")
 	},
 	"documentsSendEmail": func(ctx context.Context, c *Client) (any, error) {
-		return c.Documents.SendEmail(ctx, "id1")
+		return c.Documents.SendEmail(ctx, "id1", nil)
 	},
 
 	"webhookEndpointsCreate": func(ctx context.Context, c *Client) (any, error) {
@@ -365,7 +365,7 @@ func TestTheBodiesOfTheActions(t *testing.T) {
 	if _, err := client.WebhookEndpoints.RotateSecret(ctx, "w", &RotateWebhookEndpointSecret{PreviousSecretExpiresInHours: ptr(0)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Documents.SendEmail(ctx, "d"); err != nil {
+	if _, err := client.Documents.SendEmail(ctx, "d", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{`{}`, `{"legalName":"MI EMPRESA S.A.","tradeName":null}`, `{"previousSecretExpiresInHours":0}`, `{}`}

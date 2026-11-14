@@ -225,15 +225,11 @@ func (s *DocumentService) PDF(ctx context.Context, documentID string, options ..
 }
 
 // SendEmail emails the authorized document (RIDE and XML) again to the address of its request.
-// The new delivery shows in Email.Deliveries; daily limits apply (*RateLimitError).
-func (s *DocumentService) SendEmail(ctx context.Context, documentID string, options ...RequestOption) (*Document, error) {
-	path, err := pathOf("/v1/documents/{}/email", documentID)
-	if err != nil {
-		return nil, err
+// The new delivery shows in Email.Deliveries; daily limits apply (*RateLimitError). body may be
+// nil, which sends {}: the API has no options for it yet.
+func (s *DocumentService) SendEmail(ctx context.Context, documentID string, body *SendDocumentEmail, options ...RequestOption) (*Document, error) {
+	if body == nil {
+		body = &SendDocumentEmail{}
 	}
-	op, err := jsonOperation(http.MethodPost, path, SendDocumentEmail{})
-	if err != nil {
-		return nil, err
-	}
-	return fetch[Document](ctx, s.engine, op, options)
+	return create[Document](ctx, s.engine, options, body, "/v1/documents/{}/email", documentID)
 }

@@ -97,6 +97,9 @@ func NewClient(options ...ClientOption) (*Client, error) {
 		sleep:      sleepContext,
 		random:     rand.Float64,
 		newKey:     newUUID,
+
+		maxAnswerBytes:      maxAnswerBytes,
+		maxErrorAnswerBytes: maxErrorAnswerBytes,
 	}
 	headers, err := checkHeaders("WithHeader", settings.headers)
 	if err != nil {

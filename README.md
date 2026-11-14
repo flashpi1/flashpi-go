@@ -128,7 +128,7 @@ if err := os.WriteFile(invoice.AccessKey+".pdf", pdf, 0o644); err != nil {
 }
 
 // Reenvía RIDE y XML al correo del comprador.
-if _, err := client.Documents.SendEmail(ctx, invoice.ID); err != nil {
+if _, err := client.Documents.SendEmail(ctx, invoice.ID, nil); err != nil {
 	return err
 }
 ```

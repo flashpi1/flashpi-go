@@ -17,7 +17,7 @@ func TestEveryMethodRefusesAMissingID(t *testing.T) {
 		"Documents.Get":       func() error { _, err := client.Documents.Get(ctx, ""); return err },
 		"Documents.XML":       func() error { _, err := client.Documents.XML(ctx, ""); return err },
 		"Documents.PDF":       func() error { _, err := client.Documents.PDF(ctx, ""); return err },
-		"Documents.SendEmail": func() error { _, err := client.Documents.SendEmail(ctx, ""); return err },
+		"Documents.SendEmail": func() error { _, err := client.Documents.SendEmail(ctx, "", nil); return err },
 		"Issuers.Update":      func() error { _, err := client.Issuers.Update(ctx, "", UpdateIssuer{}); return err },
 		"Establishments.Create": func() error {
 			_, err := client.Issuers.Establishments.Create(ctx, "", CreateEstablishment{})
@@ -175,5 +175,58 @@ func TestAFailedListPageAfterTheFirst(t *testing.T) {
 	unread.HasMore, unread.NextCursor = true, "c"
 	if next, err := unread.NextPage(context.Background()); next != nil || err != nil {
 		t.Error("a page without its reader read another")
+	}
+}
+
+func TestAnswersOverTheLimitAreRefused(t *testing.T) {
+	big := strings.Repeat("x", 101)
+	cases := []struct {
+		handler handler
+		status  int
+	}{
+		{respond(200, big), 200},
+		{respond(500, strings.Repeat("e", 51)), 500},
+	}
+	for _, tc := range cases {
+		client, transport, _ := testClient(t, tc.handler)
+		client.engine.maxAnswerBytes, client.engine.maxErrorAnswerBytes = 100, 50
+		_, err := client.Documents.PDF(context.Background(), "d")
+		sdkErr := mustAs[*Error](t, err)
+		if !strings.Contains(sdkErr.Message, "the most the SDK reads") || len(transport.all()) != 1 {
+			t.Errorf("%d: got %v after %d requests", tc.status, err, len(transport.all()))
+		}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			t.Error("a too large error answer is an APIError")
+		}
+	}
+	// A compressed answer that grows past the limit.
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	_, _ = writer.Write(bytes.Repeat([]byte("a"), 10_000))
+	_ = writer.Close()
+	client, _, _ := testClient(t, respond(200, compressed.String(), "Content-Encoding", "deflate"))
+	client.engine.maxAnswerBytes = 1000
+	if _, err := client.Documents.PDF(context.Background(), "d"); err == nil || !strings.Contains(err.Error(), "the most the SDK reads") {
+		t.Errorf("got %v", err)
+	}
+	// Exactly the limit is read.
+	client, _, _ = testClient(t, respond(200, strings.Repeat("y", 100)))
+	client.engine.maxAnswerBytes = 100
+	if pdf, err := client.Documents.PDF(context.Background(), "d"); err != nil || len(pdf) != 100 {
+		t.Errorf("got %d bytes, %v", len(pdf), err)
+	}
+	if maxAnswerBytes != 64<<20 || maxErrorAnswerBytes != 1<<20 {
+		t.Error("the limits changed")
+	}
+}
+
+func TestSendEmailWithABody(t *testing.T) {
+	client, transport, _ := testClient(t, respond(202, documentJSON("d")))
+	if _, err := client.Documents.SendEmail(context.Background(), "d", &SendDocumentEmail{}); err != nil {
+		t.Fatal(err)
+	}
+	if string(transport.only(t).Body) != "{}" {
+		t.Errorf("body = %s", transport.only(t).Body)
 	}
 }
