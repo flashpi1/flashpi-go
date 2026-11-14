@@ -1,0 +1,38 @@
+// Extracted from README.md by internal/cmd/readme: edit the README, then run
+// go run ./internal/cmd/readme generate.
+
+package es
+
+import (
+	"fmt"
+	"os"
+)
+
+// Block02 is go block 02 of README.md.
+func Block02() error {
+	document, err := client.Documents.Get(ctx, invoice.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Println(document.Status)
+
+	xml, err := client.Documents.XML(ctx, invoice.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Println(xml.Kind) // flashpi.DocumentXMLKindAuthorized cuando ya lo autorizó el SRI
+
+	pdf, err := client.Documents.PDF(ctx, invoice.ID) // el RIDE, en bytes
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(invoice.AccessKey+".pdf", pdf, 0o644); err != nil {
+		return err
+	}
+
+	// Reenvía RIDE y XML al correo del comprador.
+	if _, err := client.Documents.SendEmail(ctx, invoice.ID, nil); err != nil {
+		return err
+	}
+	return nil
+}

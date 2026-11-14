@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # By hand: gh workflow run ci.yml --ref <branch>. Such a run does not count for a pull
+  # request's required checks, which only take push and pull_request runs.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Third-party actions are pinned to full commit SHAs (the comment is the release).
+jobs:
+  verify:
+    name: Lint, vet and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go (the oldest supported release)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: internal/tools/go.sum
+
+      - name: Check the module has no dependencies
+        run: |
+          test "$(go list -m all)" = "github.com/flashpi1/flashpi-go"
+          go mod tidy -diff
+          (cd internal/tools && go mod tidy -diff)
+
+      - name: Check the formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Run gofmt -w on: $unformatted"
+            exit 1
+          fi
+
+      - name: Check the generated API types match the committed OpenAPI document
+        run: go run ./internal/cmd/openapi check
+
+      - name: Check the README examples match the READMEs
+        run: go run ./internal/cmd/readme check
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags live ./...
+
+      # staticcheck is pinned in its own module (internal/tools), so the SDK's go.mod has no
+      # requirements.
+      - name: Staticcheck
+        run: |
+          go build -C internal/tools -o "${RUNNER_TEMP}/staticcheck" honnef.co/go/tools/cmd/staticcheck
+          "${RUNNER_TEMP}/staticcheck" ./...
+          "${RUNNER_TEMP}/staticcheck" -tags live ./...
+
+      - name: Test with the race detector and coverage
+        run: |
+          go test -race -count=1 -coverprofile="${RUNNER_TEMP}/coverage.out" .
+          total=$(go tool cover -func="${RUNNER_TEMP}/coverage.out" | awk '/^total:/ { sub("%", "", $3); print $3 }')
+          echo "Coverage of the flashpi package: ${total}%"
+          awk -v total="$total" 'BEGIN { exit !(total >= 95) }' || { echo "::error::Coverage ${total}% is under 95%"; exit 1; }
+          go test -race -count=1 ./internal/...
+
+  go:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26', '1.27']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No cache: the module has no dependencies, and the "Lint, vet and test" job keeps the
+      # cache of the same Go release, with staticcheck's modules in it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '${{ matrix.go }}.x'
+          cache: false
+      - run: go version
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
