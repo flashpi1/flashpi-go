@@ -65,8 +65,10 @@ jobs:
         run: |
           test -z "$(gofmt -l .)"
           go vet ./...
+          go vet -tags live ./...
           go build -C internal/tools -o "${RUNNER_TEMP}/staticcheck" honnef.co/go/tools/cmd/staticcheck
           "${RUNNER_TEMP}/staticcheck" ./...
+          "${RUNNER_TEMP}/staticcheck" -tags live ./...
           go test -race -count=1 ./...
 
       - name: Hand the new contract over
@@ -100,19 +102,6 @@ jobs:
           name: contract
           path: ${{ runner.temp }}/contract
 
-      - name: Take the two contract files, and nothing else
-        env:
-          CONTRACT: ${{ runner.temp }}/contract
-        run: |
-          for file in openapi/openapi.json types.gen.go; do
-            if [ -L "$CONTRACT/$file" ] || [ ! -f "$CONTRACT/$file" ]; then
-              echo "::error::The artifact has no regular file $file"
-              exit 1
-            fi
-            cp "$CONTRACT/$file" "$file"
-          done
-          git diff --stat -- openapi/openapi.json types.gen.go
-
       # A one-hour token for this repository only: push the branch (contents) and open or edit
       # the PR (pull requests). It is revoked when the job ends.
       - id: app-token
@@ -129,20 +118,44 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
           CHECKS: ${{ needs.sync.outputs.checks }}
+          CONTRACT: ${{ runner.temp }}/contract
         run: |
           bot_id=$(gh api "/users/${BOT}" --jq .id)
           git config user.name "$BOT"
           git config user.email "${bot_id}+${BOT}@users.noreply.github.com"
-          git -c core.hooksPath=/dev/null switch -C "$BRANCH"
+          # While its pull request is open, the branch keeps what maintainers pushed to it (the
+          # changes the new contract needs): the new contract goes on top, without a force push.
+          # Otherwise the branch starts again from the default branch.
+          state=$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null || true)
+          if [ "$state" = OPEN ] && git fetch --no-tags origin "$BRANCH"; then
+            git -c core.hooksPath=/dev/null switch -C "$BRANCH" FETCH_HEAD
+            force=""
+          else
+            git -c core.hooksPath=/dev/null switch -C "$BRANCH"
+            force="--force"
+          fi
+          # Take the two contract files, and nothing else.
+          for file in openapi/openapi.json types.gen.go; do
+            if [ -L "$CONTRACT/$file" ] || [ ! -f "$CONTRACT/$file" ]; then
+              echo "::error::The artifact has no regular file $file"
+              exit 1
+            fi
+            cp "$CONTRACT/$file" "$file"
+          done
           git add openapi/openapi.json types.gen.go
-          git -c core.hooksPath=/dev/null commit -m "chore: sync the Flashpi API contract"
-          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
-          git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
-            push --force "https://github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          if git diff --cached --quiet; then
+            echo "The branch already has this contract."
+          else
+            git diff --cached --stat
+            git -c core.hooksPath=/dev/null commit -m "chore: sync the Flashpi API contract"
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+            git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+              push $force "https://github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          fi
           if [ "$CHECKS" = success ]; then
             result="Formatting, vet, staticcheck and tests passed with the new contract."
           else
-            result="Formatting, vet, staticcheck or tests FAILED with the new contract: see the workflow run. The SDK needs changes before this can merge."
+            result="Formatting, vet, staticcheck or tests FAILED with the new contract: see the workflow run. The SDK needs changes before this can merge: push them to this branch, the daily sync keeps them."
           fi
           body="The public OpenAPI document of the Flashpi API changed. This updates openapi/openapi.json and the generated types.
 
@@ -151,7 +164,7 @@ jobs:
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
           Review new operations or fields: they may need a method (operations_test.go maps every operation) or a hand-written type."
-          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+          if [ "$state" = OPEN ]; then
             gh pr edit "$BRANCH" --body "$body"
           else
             gh pr create --head "$BRANCH" --title "chore: sync the Flashpi API contract" --body "$body"
