@@ -608,7 +608,7 @@ func TestAnswersThatCannotBeRead(t *testing.T) {
 		{respond(200, ""), "answered 200 without a body"},
 		{respond(200, "<html>"), "answered 200 with a body that is not JSON"},
 		{respond(200, `{"id":42}`), "cannot read"},
-		{respond(200, `{"status":"operational"}`, "Content-Encoding", "br"), "unsupported Content-Encoding (br)"},
+		{respond(200, `{"status":"operational"}`, "Content-Encoding", "br"), "could not be decoded: unsupported Content-Encoding br"},
 	}
 	for _, tc := range cases {
 		client, transport, _ := testClient(t, tc.handler)
@@ -734,5 +734,73 @@ func TestEncodeJSONLikeJavaScript(t *testing.T) {
 	_, err = encodeJSON(raw)
 	if sdkErr := mustAs[*Error](t, err); !strings.Contains(sdkErr.Message, "cannot be sent as JSON") {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestAnEmptyIdempotencyKeyIsRefused(t *testing.T) {
+	client, transport, _ := testClient(t)
+	ctx := context.Background()
+	for _, option := range []RequestOption{
+		WithIdempotencyKey(""),
+		WithIdempotencyKey("  \t "),
+		WithHeader("Idempotency-Key", ""),
+		WithHeader("idempotency-key", " "),
+	} {
+		_, err := client.Invoices.Create(ctx, invoiceBody, option)
+		if sdkErr := mustAs[*Error](t, err); !strings.Contains(sdkErr.Message, "Idempotency-Key is empty") {
+			t.Errorf("got %v", err)
+		}
+	}
+	if len(transport.all()) != 0 {
+		t.Error("a POST without an Idempotency-Key was sent")
+	}
+}
+
+func TestBodyTextThatIsNotUTF8IsRefused(t *testing.T) {
+	client, transport, _ := testClient(t)
+	ctx := context.Background()
+	_, err := client.Issuers.Create(ctx, CreateIssuer{LegalName: "JOS\xc9 P\xc9REZ"})
+	if sdkErr := mustAs[*Error](t, err); sdkErr.Message != "The request body has text that is not UTF-8" {
+		t.Errorf("got %v", err)
+	}
+	_, err = client.Issuers.Update(ctx, "i", UpdateIssuer{TradeName: NullableOf("\xff")})
+	mustAs[*Error](t, err)
+	body := invoiceBody
+	body.AdditionalInfo = map[string]string{"k\xff": "v"}
+	_, err = client.Invoices.Create(ctx, body)
+	mustAs[*Error](t, err)
+	if len(transport.all()) != 0 {
+		t.Error("a body that is not UTF-8 was sent")
+	}
+	for _, valid := range []any{
+		map[string]string{"a": "\ufffd"},    // a real replacement character
+		map[string]string{"a": `\ufffd`},    // the letters, after a backslash
+		map[string]string{"a": `x\\\ufffd`}, // escaped backslashes, then the letters
+	} {
+		if _, err := encodeJSON(valid); err != nil {
+			t.Errorf("%v was refused: %v", valid, err)
+		}
+	}
+	if _, err := encodeJSON(json.RawMessage("\"\xff\"")); err == nil {
+		t.Error("raw JSON that is not UTF-8 was accepted")
+	}
+	if _, err := encodeJSON(json.RawMessage(`"\ufffd"`)); err == nil {
+		t.Error("an escaped replacement character was accepted")
+	}
+}
+
+func TestConnectionHeadersAreRefused(t *testing.T) {
+	client, transport, _ := testClient(t)
+	for _, name := range []string{"Connection", "upgrade", "Keep-Alive", "Proxy-Connection", "te", "Host"} {
+		_, err := client.Status.Get(context.Background(), WithHeader(name, "x"))
+		if sdkErr := mustAs[*Error](t, err); !strings.Contains(sdkErr.Message, "managed by the HTTP client") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := NewClient(WithAPIKey(testKey), WithHeader(name, "x")); err == nil {
+			t.Errorf("a client sends %s", name)
+		}
+	}
+	if len(transport.all()) != 0 {
+		t.Error("a request was sent")
 	}
 }

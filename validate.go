@@ -60,8 +60,14 @@ func headerValue(label, value string) (string, error) {
 	return trimmed, nil
 }
 
+// connectionHeaders belong to the connection, not to the request (RFC 9113, section 8.2.2): Go's
+// HTTP/2 transport refuses some of them before sending, which would look like a network failure
+// and be retried, and drops or ignores the others (Host comes from the URL).
+var connectionHeaders = []string{"Connection", "Upgrade", "Keep-Alive", "Proxy-Connection", "TE", "Host"}
+
 // checkHeaders checks the name and the value of every header (see headerValue) and refuses
-// Content-Length and Transfer-Encoding, which the HTTP client sets from the body.
+// Content-Length and Transfer-Encoding, which the HTTP client sets from the body, and the
+// connection headers.
 func checkHeaders(label string, headers []header) ([]header, error) {
 	checked := make([]header, 0, len(headers))
 	for _, h := range headers {
@@ -70,6 +76,11 @@ func checkHeaders(label string, headers []header) ([]header, error) {
 		}
 		if strings.EqualFold(h.name, "Content-Length") || strings.EqualFold(h.name, "Transfer-Encoding") {
 			return nil, &Error{Message: fmt.Sprintf("%s: %s is set by the SDK from the body: leave it out", label, h.name)}
+		}
+		for _, managed := range connectionHeaders {
+			if strings.EqualFold(h.name, managed) {
+				return nil, &Error{Message: fmt.Sprintf("%s: %s is managed by the HTTP client: leave it out", label, h.name)}
+			}
 		}
 		value, err := headerValue(fmt.Sprintf("The value of header %q", h.name), h.value)
 		if err != nil {

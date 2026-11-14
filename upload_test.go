@@ -115,6 +115,8 @@ func TestBadCertificatesAreRefusedBeforeSending(t *testing.T) {
 		{CertificateUpload{File: bytes.NewReader(make([]byte, MaxCertificateBytes+1)), Password: "x"}, "more than 1048576 bytes"},
 		{CertificateUpload{File: failingReader{}, Password: "x"}, "could not be read: disk error"},
 		{CertificateUpload{File: strings.NewReader("p12"), Password: "x", Filename: "a\r\nX-Injected: 1"}, "control character"},
+		{CertificateUpload{File: strings.NewReader("p12"), Password: "p\xe1ss"}, "not UTF-8"},
+		{CertificateUpload{File: strings.NewReader("p12"), Password: "x", Filename: "f\xff.p12"}, "not UTF-8"},
 	}
 	for _, tc := range cases {
 		_, err := client.IssuerOnboardings.Create(ctx, tc.upload)

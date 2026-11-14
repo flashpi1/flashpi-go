@@ -125,7 +125,11 @@ func TestAHTTPClientTimeoutIsATimeout(t *testing.T) {
 	server := slowServer(t, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
 	client := serverClient(t, server, WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
 	_, err := client.Status.Get(context.Background())
-	mustAs[*TimeoutError](t, err)
+	timeout := mustAs[*TimeoutError](t, err)
+	// It names the timeout that fired, not the SDK's 60 seconds.
+	if strings.Contains(timeout.Message, "60 seconds") || !strings.Contains(timeout.Message, "timed out: ") {
+		t.Errorf("message = %q", timeout.Message)
+	}
 }
 
 func TestARealServerAnswer(t *testing.T) {

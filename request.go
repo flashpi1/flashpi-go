@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // userAgent names the SDK and its version in every request.
@@ -180,6 +181,10 @@ func (e *engine) prepare(op *operation, options []RequestOption) (*call, error) 
 	}
 	if op.method == http.MethodPost {
 		c.idempotencyKey = idempotencyKeyOf(settings, e.newKey)
+		// Without a key the API runs the POST as it comes, so a retry could issue twice.
+		if c.idempotencyKey == "" {
+			return nil, &Error{Message: "The Idempotency-Key is empty: pass a key of 1 to 255 visible ASCII characters, or leave it out and the SDK makes one"}
+		}
 	}
 	return c, nil
 }
@@ -367,15 +372,20 @@ func (e *engine) attempt(ctx context.Context, op *operation, c *call) (*answer, 
 		return nil, e.transportError(ctx, attemptCtx, op, c, err)
 	}
 	defer response.Body.Close()
-	data, err := readBody(response)
+	raw, err := io.ReadAll(response.Body)
 	if err != nil {
-		var unsupported *unsupportedEncodingError
-		if errors.As(err, &unsupported) {
-			return nil, &Error{Message: fmt.Sprintf("%s %s: the API answered with an unsupported Content-Encoding (%s)", op.method, c.url, unsupported.encoding)}
-		}
 		return nil, e.transportError(ctx, attemptCtx, op, c, err)
 	}
-	if response.StatusCode < 200 || response.StatusCode > 299 {
+	success := response.StatusCode >= 200 && response.StatusCode <= 299
+	// The answer arrived: a body that cannot be decoded is never retried as a lost answer.
+	data, err := decodeBody(response, raw)
+	if err != nil {
+		if success {
+			return nil, &Error{Message: fmt.Sprintf("%s %s: the API's answer could not be decoded: %v", op.method, c.url, err), Err: err}
+		}
+		data = raw // the error status still counts
+	}
+	if !success {
 		return nil, newAPIError(response.StatusCode, response.Header, data)
 	}
 	return &answer{
@@ -424,18 +434,22 @@ func (e *engine) transportError(ctx, attemptCtx context.Context, op *operation, 
 	if ctx.Err() != nil {
 		return e.cancelled(ctx, op, c)
 	}
-	var timeout interface{ Timeout() bool }
-	if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+	reason := err.Error()
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		reason = urlErr.Err.Error()
+	}
+	if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
 		seconds := strings.TrimRight(strings.TrimRight(strconv.FormatFloat(c.timeout.Seconds(), 'f', 3, 64), "0"), ".")
 		return &TimeoutError{&ConnectionError{
 			Message: fmt.Sprintf("%s %s timed out after %s seconds", op.method, c.url, seconds),
 			Err:     err,
 		}}
 	}
-	reason := err.Error()
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		reason = urlErr.Err.Error()
+	// Another timeout, such as the Timeout of a caller's http.Client.
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return &TimeoutError{&ConnectionError{Message: fmt.Sprintf("%s %s timed out: %s", op.method, c.url, reason), Err: err}}
 	}
 	return &ConnectionError{Message: fmt.Sprintf("%s %s failed: %s", op.method, c.url, reason), Err: err}
 }
@@ -446,28 +460,22 @@ func (e *engine) cancelled(ctx context.Context, op *operation, c *call) error {
 	return &Error{Message: fmt.Sprintf("%s %s: %v", op.method, c.url, cause), Err: cause}
 }
 
-type unsupportedEncodingError struct{ encoding string }
-
-func (e *unsupportedEncodingError) Error() string {
-	return "unsupported Content-Encoding " + e.encoding
-}
-
-// readBody reads the whole body, decoded when the transport left it compressed (a caller that
-// sets its own Accept-Encoding).
-func readBody(response *http.Response) ([]byte, error) {
+// decodeBody decodes a body the transport left compressed (a caller that sets its own
+// Accept-Encoding, or an answer without a body that the transport does not decode).
+func decodeBody(response *http.Response, raw []byte) ([]byte, error) {
 	encoding := strings.ToLower(strings.TrimSpace(response.Header.Get("Content-Encoding")))
-	if response.Uncompressed || encoding == "" || encoding == "identity" {
-		return io.ReadAll(response.Body)
+	if response.Uncompressed || len(raw) == 0 || encoding == "" || encoding == "identity" {
+		return raw, nil
 	}
 	var reader io.ReadCloser
 	var err error
 	switch encoding {
 	case "gzip", "x-gzip":
-		reader, err = gzip.NewReader(response.Body)
+		reader, err = gzip.NewReader(bytes.NewReader(raw))
 	case "deflate":
-		reader, err = zlib.NewReader(response.Body)
+		reader, err = zlib.NewReader(bytes.NewReader(raw))
 	default:
-		return nil, &unsupportedEncodingError{encoding}
+		return nil, fmt.Errorf("unsupported Content-Encoding %s", encoding)
 	}
 	if err != nil {
 		return nil, err
@@ -478,11 +486,47 @@ func readBody(response *http.Response) ([]byte, error) {
 
 // encodeJSON is the body of a request: compact UTF-8 JSON, as JSON.stringify writes it.
 func encodeJSON(body any) ([]byte, error) {
+	content, err := marshalJSON(body)
+	if err != nil {
+		return nil, &Error{Message: "The request body cannot be sent as JSON: " + err.Error(), Err: err}
+	}
+	// encoding/json replaces each byte that is not UTF-8 with the escape \ufffd (and writes a
+	// real U+FFFD as it is), and passes a json.RawMessage through: either way the text would
+	// reach the SRI altered, so it is refused, as in headers.
+	if !utf8.Valid(content) || hasReplacementEscape(content) {
+		return nil, &Error{Message: "The request body has text that is not UTF-8"}
+	}
+	return content, nil
+}
+
+// hasReplacementEscape reports whether JSON text holds the escape \ufffd itself, not an
+// escaped backslash followed by the letters ufffd.
+func hasReplacementEscape(content []byte) bool {
+	for index := bytes.Index(content, []byte(`\ufffd`)); index >= 0; {
+		backslashes := 0
+		for i := index; i >= 0 && content[i] == '\\'; i-- {
+			backslashes++
+		}
+		if backslashes%2 == 1 {
+			return true
+		}
+		next := bytes.Index(content[index+1:], []byte(`\ufffd`))
+		if next < 0 {
+			return false
+		}
+		index += 1 + next
+	}
+	return false
+}
+
+// marshalJSON is json.Marshal without HTML escaping (<, > and & stay as they are), as
+// JSON.stringify writes it.
+func marshalJSON(value any) ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(body); err != nil {
-		return nil, &Error{Message: "The request body cannot be sent as JSON: " + err.Error(), Err: err}
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
 	}
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }

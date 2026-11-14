@@ -80,12 +80,25 @@ func TestDeflateAndBrokenCompression(t *testing.T) {
 	if status, err := client.Status.Get(context.Background()); err != nil || status.Status != StatusStatusOperational {
 		t.Errorf("got %v %v", status, err)
 	}
-	client, _, _ = testClientWith(t, []ClientOption{WithMaxRetries(0)}, respond(200, "not gzip", "Content-Encoding", "gzip"))
+	// An answer that arrived but cannot be decoded is not a lost answer: it is not retried.
+	client, transport, _ := testClient(t, respond(200, "not gzip", "Content-Encoding", "gzip"))
 	_, err := client.Status.Get(context.Background())
-	mustAs[*ConnectionError](t, err)
-	if (&unsupportedEncodingError{"br"}).Error() != "unsupported Content-Encoding br" {
-		t.Error("the message of an unsupported encoding")
+	if sdkErr := mustAs[*Error](t, err); !strings.Contains(sdkErr.Message, "could not be decoded") || len(transport.all()) != 1 {
+		t.Errorf("got %v after %d requests", err, len(transport.all()))
 	}
+	var connErr *ConnectionError
+	if errors.As(err, &connErr) {
+		t.Error("an undecodable answer is a ConnectionError")
+	}
+	// An empty body needs no decoding, whatever its Content-Encoding says.
+	client, transport, _ = testClient(t, respond(204, "", "Content-Encoding", "gzip"))
+	if err := client.Issuers.Delete(context.Background(), "i"); err != nil || len(transport.all()) != 1 {
+		t.Errorf("got %v after %d requests", err, len(transport.all()))
+	}
+	// An error status keeps its status when its body cannot be decoded.
+	client, _, _ = testClient(t, respond(404, "not gzip", "Content-Encoding", "gzip"))
+	_, err = client.Status.Get(context.Background())
+	mustAs[*NotFoundError](t, err)
 }
 
 func TestARecoveryNeedsADocumentID(t *testing.T) {

@@ -48,7 +48,7 @@ func (n Nullable[T]) MarshalJSON() ([]byte, error) {
 	if n.state != nullableSet {
 		return []byte("null"), nil
 	}
-	return json.Marshal(n.value)
+	return marshalJSON(n.value)
 }
 
 // UnmarshalJSON reads null as Null and anything else as a value.

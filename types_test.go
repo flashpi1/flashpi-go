@@ -31,6 +31,10 @@ func TestNullable(t *testing.T) {
 			t.Errorf("got %s %v, want %s", data, err, tc.want)
 		}
 	}
+	content, _ := encodeJSON(CreateWebhookEndpoint{URL: "https://a.test/?x=1&y=<2>", Description: NullableOf("A & B <c>")})
+	if string(content) != `{"url":"https://a.test/?x=1&y=<2>","description":"A & B <c>","enabledEvents":null}` {
+		t.Errorf("body = %s", content)
+	}
 	var zero Nullable[int]
 	if !zero.IsZero() || zero.IsNull() {
 		t.Error("the zero value is not unset")

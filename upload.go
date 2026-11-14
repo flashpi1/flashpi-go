@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/textproto"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxCertificateBytes is the largest .p12 the API accepts (413 payload_too_large above it).
@@ -56,6 +57,9 @@ func certificateForm(upload CertificateUpload) (*operation, error) {
 		if r < 0x20 || r == 0x7f {
 			return nil, &Error{Message: "The certificate filename has a line break or another control character"}
 		}
+	}
+	if !utf8.ValidString(filename) || !utf8.ValidString(upload.Password) {
+		return nil, &Error{Message: "The certificate filename or password has text that is not UTF-8"}
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
