@@ -119,6 +119,22 @@ func (n *node) get(key string) *node {
 
 func (n *node) has(key string) bool { return n.get(key) != nil }
 
+// children returns the items of an array, or nil for anything else.
+func (n *node) children() []*node {
+	if n == nil || n.kind != kindArray {
+		return nil
+	}
+	return n.items
+}
+
+// entries returns the members of an object, or nil for anything else.
+func (n *node) entries() []member {
+	if n == nil || n.kind != kindObject {
+		return nil
+	}
+	return n.members
+}
+
 func (n *node) keys() []string {
 	if n == nil || n.kind != kindObject {
 		return nil

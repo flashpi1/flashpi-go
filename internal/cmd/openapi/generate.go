@@ -224,15 +224,15 @@ func (g *generator) classify() (map[string]direction, error) {
 		return nil
 	}
 	paths := g.document.get("paths")
-	for _, path := range paths.members {
-		for _, operation := range path.value.members {
+	for _, path := range paths.entries() {
+		for _, operation := range path.value.entries() {
 			if !isMethod(operation.key) {
 				continue
 			}
 			if err := walk(operation.value.get("requestBody"), sent); err != nil {
 				return nil, err
 			}
-			for _, response := range operation.value.get("responses").members {
+			for _, response := range operation.value.get("responses").entries() {
 				if strings.HasPrefix(response.key, "2") {
 					if err := walk(response.value, received); err != nil {
 						return nil, err
@@ -450,7 +450,7 @@ func (g *generator) combination(schema *node, combinator, hint, where string, di
 			return goType{}, fmt.Errorf("%s: %s with %s", where, combinator, key)
 		}
 	}
-	members := schema.get(combinator).items
+	members := schema.get(combinator).children()
 	switch combinator {
 	case "allOf":
 		if len(members) != 1 {
@@ -487,7 +487,7 @@ func (g *generator) combination(schema *node, combinator, hint, where string, di
 
 func (g *generator) enum(schema *node, hint, where string, nullable bool) (goType, error) {
 	var values []string
-	for _, item := range schema.get("enum").items {
+	for _, item := range schema.get("enum").children() {
 		switch item.kind {
 		case kindNull:
 			nullable = true
@@ -571,7 +571,7 @@ func (g *generator) object(name string, schema *node, where string, dir directio
 		return fmt.Errorf("%s: %w", where, err)
 	}
 	seen := map[string]string{}
-	for _, property := range properties.members {
+	for _, property := range properties.entries() {
 		fieldName, err := goName(property.key)
 		if err != nil {
 			return fmt.Errorf("%s.%s: %w", where, property.key, err)
@@ -691,7 +691,7 @@ func (g *generator) union(name string, schema *node, where string) error {
 	}
 	def := &definition{name: name, doc: describe(schema), union: &unionDef{discriminant: property, byValue: map[string]string{}}}
 	referenced := map[string]bool{}
-	for index, item := range schema.get("oneOf").items {
+	for index, item := range schema.get("oneOf").children() {
 		ref := strings.TrimPrefix(item.get("$ref").str(), "#/components/schemas/")
 		if g.schemas.get(ref) == nil || len(item.members) != 1 {
 			return fmt.Errorf("%s.oneOf[%d]: a discriminated union must list references only", where, index)
@@ -706,7 +706,7 @@ func (g *generator) union(name string, schema *node, where string) error {
 		referenced[ref] = true
 		def.union.members = append(def.union.members, memberName)
 	}
-	for _, entry := range discriminator.get("mapping").members {
+	for _, entry := range discriminator.get("mapping").entries() {
 		target := strings.TrimPrefix(entry.value.str(), "#/components/schemas/")
 		if !referenced[target] {
 			return fmt.Errorf("%s: the mapping %s points outside the union", where, entry.key)
@@ -777,8 +777,8 @@ func (g *generator) checkEventMember(schemaName string) error {
 
 // queries defines the query struct of every operation that takes one.
 func (g *generator) queries() error {
-	for _, path := range g.document.get("paths").members {
-		for _, operation := range path.value.members {
+	for _, path := range g.document.get("paths").entries() {
+		for _, operation := range path.value.entries() {
 			if !isMethod(operation.key) {
 				continue
 			}
@@ -799,7 +799,7 @@ func (g *generator) queries() error {
 				doc:    fmt.Sprintf("%s holds the query of %s (%s %s). Nil members are not sent.", name, operationID, strings.ToUpper(operation.key), path.key),
 				isList: true,
 			}
-			for _, raw := range operation.value.get("parameters").items {
+			for _, raw := range operation.value.get("parameters").children() {
 				parameter, err := g.parameter(raw, operationID)
 				if err != nil {
 					return err
