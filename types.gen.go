@@ -62,13 +62,13 @@ type AccountEmailSendingWindow struct {
 	Since time.Time `json:"since"`
 
 	// Emails the email provider accepted.
-	Sent float64 `json:"sent"`
+	Sent int `json:"sent"`
 
 	// Of those, hard bounces (`bounce_permanent`: the address or the domain does not exist).
-	HardBounces float64 `json:"hardBounces"`
+	HardBounces int `json:"hardBounces"`
 
 	// Of those, emails the recipient marked as spam.
-	Complaints float64 `json:"complaints"`
+	Complaints int `json:"complaints"`
 }
 
 // AccountEvent: An event about the account's email sending: `data` is the AccountEmailSending as
@@ -182,7 +182,8 @@ const (
 )
 
 // CertificateListParams holds the query of certificatesList (GET
-// /v1/issuers/{issuerId}/certificates). Nil members are not sent.
+// /v1/issuers/{issuerId}/certificates). Nil members are not sent. Limit is the size of each page:
+// List walks every page, so break out of the loop to stop early.
 type CertificateListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -659,7 +660,7 @@ type Document struct {
 
 	EmissionPoint string `json:"emissionPoint"`
 
-	Sequential float64 `json:"sequential"`
+	Sequential int `json:"sequential"`
 
 	// Establishment-emission point-sequential.
 	Number string `json:"number"`
@@ -925,7 +926,8 @@ type DocumentItem struct {
 }
 
 // DocumentListParams holds the query of documentsList (GET /v1/documents). Nil members are not
-// sent.
+// sent. Limit is the size of each page: List walks every page, so break out of the loop to stop
+// early.
 type DocumentListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -1206,7 +1208,8 @@ type EmissionPoint struct {
 
 // EmissionPointListParams holds the query of emissionPointsList (GET
 // /v1/issuers/{issuerId}/establishments/{establishmentId}/emission-points). Nil members are not
-// sent.
+// sent. Limit is the size of each page: List walks every page, so break out of the loop to stop
+// early.
 type EmissionPointListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -1358,7 +1361,8 @@ type Establishment struct {
 }
 
 // EstablishmentListParams holds the query of establishmentsList (GET
-// /v1/issuers/{issuerId}/establishments). Nil members are not sent.
+// /v1/issuers/{issuerId}/establishments). Nil members are not sent. Limit is the size of each page:
+// List walks every page, so break out of the loop to stop early.
 type EstablishmentListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -1382,10 +1386,9 @@ func (p *EstablishmentListParams) values() url.Values {
 	return query
 }
 
-// Event is what happened to a resource: one of *DocumentEvent, *CertificateEvent or *AccountEvent,
-// or an *UnknownEvent for a type this version of the SDK does not know. Use a type switch.
-// Something that happened to a resource. The webhook body is this same object (without `data` for
-// thin endpoints), and `id` is its webhook-id header.
+// Event is what happened to a resource, as client.Events returns it: one of *DocumentEvent,
+// *CertificateEvent or *AccountEvent, or an *UnknownEvent for a type this version of the SDK does
+// not know. Use a type switch. A webhook endpoint receives a WebhookEvent: see UnwrapWebhook.
 type Event interface {
 	WebhookEvent
 	isEvent()
@@ -1443,7 +1446,8 @@ func decodeEvent(data []byte) (Event, error) {
 	return event, nil
 }
 
-// EventListParams holds the query of eventsList (GET /v1/events). Nil members are not sent.
+// EventListParams holds the query of eventsList (GET /v1/events). Nil members are not sent. Limit
+// is the size of each page: List walks every page, so break out of the loop to stop early.
 type EventListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -1637,6 +1641,7 @@ type IssuerBrandingInput struct {
 }
 
 // IssuerListParams holds the query of issuersList (GET /v1/issuers). Nil members are not sent.
+// Limit is the size of each page: List walks every page, so break out of the loop to stop early.
 type IssuerListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -1996,15 +2001,6 @@ const (
 	ModifiedDocumentTypeInvoice ModifiedDocumentType = "invoice"
 )
 
-// Pagination: Position of a page in a list.
-type Pagination struct {
-	// Cursor of the next page (send it as `cursor`), or null on the last page.
-	NextCursor *string `json:"nextCursor"`
-
-	// Whether there are more items after this page.
-	HasMore bool `json:"hasMore"`
-}
-
 // PayloadMode is a value of the API. One of the constants below. The API may add values: keep a
 // default case.
 type PayloadMode string
@@ -2044,7 +2040,7 @@ type ProblemDetails struct {
 	Title string `json:"title"`
 
 	// HTTP status code.
-	Status float64 `json:"status"`
+	Status int `json:"status"`
 
 	// Localized explanation of this occurrence.
 	Detail string `json:"detail"`
@@ -2442,7 +2438,7 @@ type WebhookDelivery struct {
 	// `pending` (an attempt is scheduled or running), `succeeded` or `failed`.
 	Status WebhookDeliveryStatus `json:"status"`
 
-	AttemptCount float64 `json:"attemptCount"`
+	AttemptCount int `json:"attemptCount"`
 
 	// Format: date-time.
 	NextAttemptAt *time.Time `json:"nextAttemptAt"`
@@ -2473,14 +2469,14 @@ type WebhookDelivery struct {
 // WebhookDeliveryAttempt: One HTTP attempt of a delivery.
 type WebhookDeliveryAttempt struct {
 	// 1 for the first attempt.
-	Number float64 `json:"number"`
+	Number int `json:"number"`
 
 	Trigger WebhookDeliveryAttemptTrigger `json:"trigger"`
 
 	// Format: date-time.
 	StartedAt time.Time `json:"startedAt"`
 
-	DurationMs float64 `json:"durationMs"`
+	DurationMs int `json:"durationMs"`
 
 	ResponseStatus *int `json:"responseStatus"`
 
@@ -2520,7 +2516,7 @@ type WebhookDeliveryDetail struct {
 	// `pending` (an attempt is scheduled or running), `succeeded` or `failed`.
 	Status WebhookDeliveryStatus `json:"status"`
 
-	AttemptCount float64 `json:"attemptCount"`
+	AttemptCount int `json:"attemptCount"`
 
 	// Format: date-time.
 	NextAttemptAt *time.Time `json:"nextAttemptAt"`
@@ -2552,7 +2548,8 @@ type WebhookDeliveryDetail struct {
 }
 
 // WebhookDeliveryListParams holds the query of webhookEndpointsDeliveriesList (GET
-// /v1/webhook-endpoints/{endpointId}/deliveries). Nil members are not sent.
+// /v1/webhook-endpoints/{endpointId}/deliveries). Nil members are not sent. Limit is the size of
+// each page: List walks every page, so break out of the loop to stop early.
 type WebhookDeliveryListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -2651,7 +2648,8 @@ type WebhookEndpoint struct {
 }
 
 // WebhookEndpointListParams holds the query of webhookEndpointsList (GET /v1/webhook-endpoints).
-// Nil members are not sent.
+// Nil members are not sent. Limit is the size of each page: List walks every page, so break out of
+// the loop to stop early.
 type WebhookEndpointListParams struct {
 	// Maximum number of items to return. Default: 20.
 	Limit *int
@@ -2707,7 +2705,7 @@ type WebhookEndpointVerification struct {
 	InProgress bool `json:"inProgress"`
 
 	// Attempts of the current handshake.
-	Attempts float64 `json:"attempts"`
+	Attempts int `json:"attempts"`
 
 	// Format: date-time.
 	LastAttemptAt *time.Time `json:"lastAttemptAt"`

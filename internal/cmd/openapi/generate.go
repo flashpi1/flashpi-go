@@ -58,35 +58,81 @@ var eventTypes = []string{
 	"account.email_resumed",
 }
 
-// sharedEnums names the inline enums that several schemas repeat with the same values, in the
-// same order: each set becomes one Go type instead of one per property. An enum whose values
-// change no longer matches its entry and gets its own name, so a change is never folded in
-// silently.
-var sharedEnums = []struct {
-	name   string
-	values []string
-}{
-	{"DocumentStatus", []string{"processing", "pending_sri", "authorized", "rejected", "failed", "voided"}},
-	{"DocumentType", []string{"invoice", "purchase_settlement", "credit_note", "debit_note", "waybill", "withholding"}},
-	{"EnabledEvent", append(slices.Clone(eventTypes), "*")},
-	{"Environment", []string{"test", "live"}},
-	{"EventType", eventTypes},
-	{"IDType", []string{"ruc", "cedula", "passport", "final_consumer", "foreign_id"}},
-	{"PaymentMethod", []string{"cash", "debt_offset", "debit_card", "electronic_money", "prepaid_card", "credit_card", "other_financial_system", "securities_endorsement"}},
-	{"PayloadMode", []string{"full", "thin"}},
-	{"RIDEStatus", []string{"pending", "generated", "failed"}},
-	{"RIMPERegime", []string{"entrepreneur", "popular_business"}},
-	{"TaxType", []string{"vat", "ice"}},
-	{"WebhookDeliveryStatus", []string{"pending", "succeeded", "failed"}},
+// sharedEnums names the inline enums that several members repeat with the same values, in the
+// same order: each set becomes one Go type instead of one per member. Every member is listed by
+// its path (Schema.member, Schema.member.items, operationId.parameter), so a contract change
+// can never rename a member's type silently: a listed member whose values change, a member that
+// is not listed but has a shared set's values, and a listed member that no longer exists all
+// stop the generator.
+var sharedEnums = []sharedSet{
+	{"DocumentStatus", []string{"processing", "pending_sri", "authorized", "rejected", "failed", "voided"},
+		[]string{"Document.status", "ProblemDetails.documentStatus", "documentsList.status"}},
+	{"DocumentType", []string{"invoice", "purchase_settlement", "credit_note", "debit_note", "waybill", "withholding"},
+		[]string{"Document.type", "WaybillSupportingDocument.type", "documentsList.type"}},
+	{"EnabledEvent", append(slices.Clone(eventTypes), "*"),
+		[]string{"CreateWebhookEndpoint.enabledEvents.items", "UpdateWebhookEndpoint.enabledEvents.items", "WebhookEndpoint.enabledEvents.items"}},
+	{"Environment", []string{"test", "live"},
+		[]string{"AccountEmailSending.environment", "AccountEvent.environment", "Certificate.environment", "CertificateEvent.environment", "Document.environment", "DocumentEvent.environment", "EventThin.environment", "ProblemDetails.environment", "WebhookEndpoint.environment", "WebhookEndpointVerificationEvent.environment"}},
+	{"EventType", eventTypes,
+		[]string{"EventThin.type", "WebhookDelivery.eventType", "WebhookDeliveryDetail.eventType", "webhookEndpointsDeliveriesList.eventType", "eventsList.type"}},
+	{"IDType", []string{"ruc", "cedula", "passport", "final_consumer", "foreign_id"},
+		[]string{"DocumentParty.idType", "WaybillCarrier.idType", "WithheldSubject.idType"}},
+	{"PaymentMethod", []string{"cash", "debt_offset", "debit_card", "electronic_money", "prepaid_card", "credit_card", "other_financial_system", "securities_endorsement"},
+		[]string{"DocumentPayment.method", "WithholdingPayment.method"}},
+	{"PayloadMode", []string{"full", "thin"},
+		[]string{"CreateWebhookEndpoint.payloadMode", "UpdateWebhookEndpoint.payloadMode", "WebhookDelivery.payloadMode", "WebhookDeliveryDetail.payloadMode", "WebhookEndpoint.payloadMode"}},
+	{"RIDEStatus", []string{"pending", "generated", "failed"},
+		[]string{"DocumentRide.status", "ProblemDetails.rideStatus"}},
+	{"RIMPERegime", []string{"entrepreneur", "popular_business"},
+		[]string{"IssuerTaxProfile.rimpeRegime", "IssuerTaxProfileInput.rimpeRegime", "IssuerTaxProfilePatch.rimpeRegime"}},
+	{"TaxType", []string{"vat", "ice"},
+		[]string{"DocumentTax.type", "DocumentTaxTotal.type"}},
+	{"WebhookDeliveryStatus", []string{"pending", "succeeded", "failed"},
+		[]string{"WebhookDelivery.status", "WebhookDeliveryDetail.status", "webhookEndpointsDeliveriesList.status"}},
 }
 
-func sharedEnum(values []string) (string, bool) {
-	for _, shared := range sharedEnums {
-		if slices.Equal(shared.values, values) {
-			return shared.name, true
+// integerMembers are whole numbers the contract types as number (the API's DTOs lack
+// type: 'integer'): they are int, as the API sends them. A listed member that is no longer a
+// number, or no longer exists, stops the generator: once the contract says integer, remove it.
+var integerMembers = []string{
+	"AccountEmailSendingWindow.complaints",
+	"AccountEmailSendingWindow.hardBounces",
+	"AccountEmailSendingWindow.sent",
+	"Document.sequential",
+	"ProblemDetails.status",
+	"WebhookDelivery.attemptCount",
+	"WebhookDeliveryAttempt.durationMs",
+	"WebhookDeliveryAttempt.number",
+	"WebhookDeliveryDetail.attemptCount",
+	"WebhookEndpointVerification.attempts",
+}
+
+type sharedSet struct {
+	name    string
+	values  []string
+	members []string
+}
+
+// skippedSchemas are not generated: the SDK has its own type for them.
+var skippedSchemas = map[string]string{
+	"Pagination": "Page[T] holds the pagination of a list",
+}
+
+// sharedEnum is the shared type of the enum at path, or "".
+func (g *generator) sharedEnum(path string, values []string) (string, error) {
+	for _, shared := range g.shared {
+		listed := slices.Contains(shared.members, path)
+		same := slices.Equal(shared.values, values)
+		switch {
+		case listed && same:
+			return shared.name, nil
+		case listed:
+			return "", fmt.Errorf("%s: its values are no longer those of %s: update sharedEnums in internal/cmd/openapi", path, shared.name)
+		case same:
+			return "", fmt.Errorf("%s: it has the values of %s: add it to that entry of sharedEnums in internal/cmd/openapi", path, shared.name)
 		}
 	}
-	return "", false
+	return "", nil
 }
 
 // direction says whether a schema describes what the SDK sends or what it receives: optional
@@ -155,6 +201,9 @@ type generator struct {
 	directions map[string]direction
 	defs       map[string]*definition
 	enumSets   map[string]string // shared value sets already defined
+	seen       map[string]bool   // the paths of sharedEnums and integerMembers met
+	shared     []sharedSet
+	integers   []string
 	needTime   bool
 	needJSON   bool
 	needQuery  bool
@@ -172,6 +221,7 @@ func newGenerator(document *node) (*generator, error) {
 		parameters: components.get("parameters"),
 		defs:       map[string]*definition{},
 		enumSets:   map[string]string{},
+		seen:       map[string]bool{},
 	}
 	if g.schemas == nil || g.schemas.kind != kindObject {
 		return nil, fmt.Errorf("the document has no components.schemas")
@@ -514,7 +564,13 @@ func (g *generator) enum(schema *node, hint, where string, nullable bool) (goTyp
 	}
 	key := strings.Join(values, "|")
 	name := hint
-	if shared, ok := sharedEnum(values); ok {
+	path := strings.TrimPrefix(where, "components.schemas.")
+	shared, err := g.sharedEnum(path, values)
+	if err != nil {
+		return goType{}, err
+	}
+	if shared != "" {
+		g.seen[path] = true
 		name = shared
 		if _, done := g.enumSets[key]; done {
 			return goType{expr: name, kind: kindValue, nullable: nullable}, nil
@@ -602,6 +658,13 @@ func (g *generator) object(name string, schema *node, where string, dir directio
 		if err != nil {
 			return err
 		}
+		if path := strings.TrimPrefix(where, "components.schemas.") + "." + property.key; slices.Contains(g.integers, path) {
+			if typ.expr != "float64" {
+				return fmt.Errorf("%s is no longer a number: remove it from integerMembers in internal/cmd/openapi", path)
+			}
+			g.seen[path] = true
+			typ.expr = "int"
+		}
 		if typ.kind == kindReference && g.isUnion(typ.expr) {
 			return fmt.Errorf("%s.%s: a union inside an object is not supported", where, property.key)
 		}
@@ -657,7 +720,7 @@ func (g *generator) component(schemaName string, schema *node) error {
 	if err := g.checkKeywords(schema, where); err != nil {
 		return err
 	}
-	if isListBody(schema) {
+	if _, skipped := skippedSchemas[schemaName]; isListBody(schema) || skipped {
 		return nil
 	}
 	name, err := g.typeName(schemaName)
@@ -922,6 +985,11 @@ func joinSentences(first, second string) string {
 
 // Generate returns the Go source of the types of a contract.
 func Generate(contract []byte) ([]byte, error) {
+	return generate(contract, sharedEnums, integerMembers)
+}
+
+// generate is Generate with its own tables of shared enums and integer members.
+func generate(contract []byte, shared []sharedSet, integers []string) ([]byte, error) {
 	document, err := parseJSON(contract)
 	if err != nil {
 		return nil, fmt.Errorf("the contract is not JSON: %w", err)
@@ -930,6 +998,7 @@ func Generate(contract []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	g.shared, g.integers = shared, integers
 	names := g.schemas.keys()
 	sort.Strings(names)
 	for _, name := range names {
@@ -942,6 +1011,18 @@ func Generate(contract []byte) ([]byte, error) {
 	}
 	if err := g.check(); err != nil {
 		return nil, err
+	}
+	for _, shared := range g.shared {
+		for _, path := range shared.members {
+			if !g.seen[path] {
+				return nil, fmt.Errorf("%s is listed in sharedEnums but is no longer an enum of the contract: remove it", path)
+			}
+		}
+	}
+	for _, path := range g.integers {
+		if !g.seen[path] {
+			return nil, fmt.Errorf("%s is listed in integerMembers but is no longer in the contract: remove it", path)
+		}
 	}
 	source := g.emit()
 	formatted, err := format.Source(source)
@@ -1123,7 +1204,13 @@ func (v %[1]s) MarshalJSON() ([]byte, error) {
 }
 
 func emitQuery(out *bytes.Buffer, def *definition) {
-	comment(out, "", def.doc)
+	doc := def.doc
+	for _, f := range def.query {
+		if f.jsonName == "limit" {
+			doc += " Limit is the size of each page: List walks every page, so break out of the loop to stop early."
+		}
+	}
+	comment(out, "", doc)
 	fmt.Fprintf(out, "type %s struct {\n", def.name)
 	for index, f := range def.query {
 		if index > 0 {
@@ -1149,10 +1236,8 @@ func emitUnion(out *bytes.Buffer, def *definition) {
 		members = append(members, "*"+name)
 	}
 	list := strings.Join(members[:len(members)-1], ", ") + " or " + members[len(members)-1]
-	doc := def.name + " is what happened to a resource: one of " + list + ", or an *UnknownEvent for a type this version of the SDK does not know. Use a type switch."
-	if def.doc != "" {
-		doc += " " + def.doc
-	}
+	// The contract's description speaks of the webhook body; in Go that is a WebhookEvent.
+	doc := def.name + " is what happened to a resource, as client.Events returns it: one of " + list + ", or an *UnknownEvent for a type this version of the SDK does not know. Use a type switch. A webhook endpoint receives a WebhookEvent: see UnwrapWebhook."
 	comment(out, "", doc)
 	fmt.Fprintf(out, "type %s interface {\n\tWebhookEvent\n\tis%s()\n}\n", def.name, def.name)
 	for _, name := range def.union.members {

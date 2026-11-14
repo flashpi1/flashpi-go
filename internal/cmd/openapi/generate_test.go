@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -76,7 +77,7 @@ func TestTheGeneratorRefusesWhatItDoesNotKnow(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := Generate(tc.contract)
+			_, err := generate(tc.contract, nil, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.message) {
 				t.Errorf("got %v, want %q", err, tc.message)
 			}
@@ -101,7 +102,7 @@ func TestWhatTheGeneratorWrites(t *testing.T) {
 		"Patch":{"type":"object","properties":{"name":{"type":["string","null"]},"nested":{"anyOf":[{"$ref":"#/components/schemas/Nested"},{"type":"null"}]}}},
 		"Nested":{"type":"object","properties":{"x":{"type":"string"}}}
 	}`, `{"/patch":{"patch":{"operationId":"patch","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Patch"}}}},"responses":{}}}}`)
-	source, err := Generate(contract)
+	source, err := generate(contract, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,5 +192,39 @@ func TestRunNeedsTheModuleRoot(t *testing.T) {
 	}
 	if isHTTPS("http://flashpi.com.ec/docs/openapi.json") || !isHTTPS("https://flashpi.com.ec/docs/openapi.json") || isHTTPS("https://") {
 		t.Error("isHTTPS")
+	}
+}
+
+func TestTheTablesOfTheGenerator(t *testing.T) {
+	contract := document(`{
+		"A":{"type":"object","properties":{"mode":{"type":"string","enum":["x","y"]},"n":{"type":"number"}}},
+		"B":{"type":"object","properties":{"mode":{"type":"string","enum":["x","y"]},"tags":{"type":"array","items":{"type":"string","enum":["x","y"]}}}}
+	}`, `{"/l":{"get":{"operationId":"bList","parameters":[{"name":"mode","in":"query","schema":{"type":"string","enum":["x","y"]}}],"responses":{}}}}`)
+	all := []string{"A.mode", "B.mode", "B.tags.items", "bList.mode"}
+	source, err := generate(contract, []sharedSet{{"Mode", []string{"x", "y"}, all}}, []string{"A.n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(source)), " ")
+	for _, want := range []string{"Mode *Mode `json:\"mode,omitempty\"`", "Tags []Mode", "N *int `json:\"n,omitempty\"`", "type Mode string"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the output has no %q", want)
+		}
+	}
+	failures := map[string]struct {
+		shared   []sharedSet
+		integers []string
+		message  string
+	}{
+		"a member left out":       {[]sharedSet{{"Mode", []string{"x", "y"}, all[:3]}}, nil, "bList.mode: it has the values of Mode"},
+		"values that changed":     {[]sharedSet{{"Mode", []string{"x", "y", "z"}, all}}, nil, "no longer those of Mode"},
+		"a member that is gone":   {[]sharedSet{{"Mode", []string{"x", "y"}, append(slices.Clone(all), "C.mode")}}, nil, "C.mode is listed in sharedEnums"},
+		"an integer that is not":  {nil, []string{"A.mode"}, "A.mode is no longer a number"},
+		"an integer that is gone": {[]sharedSet{{"Mode", []string{"x", "y"}, all}}, []string{"A.gone"}, "A.gone is listed in integerMembers"},
+	}
+	for name, tc := range failures {
+		if _, err := generate(contract, tc.shared, tc.integers); err == nil || !strings.Contains(err.Error(), tc.message) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.message)
+		}
 	}
 }
