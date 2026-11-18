@@ -64,7 +64,7 @@ func main() {
 			UnitPrice:   "1.00",
 			Taxes:       []flashpi.DocumentTax{{Type: flashpi.TaxTypeVAT, Rate: "15"}},
 		}},
-		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: "1.15"}},
+		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: new("1.15")}},
 		Options:  &flashpi.DocumentOptions{WaitForAuthorization: new(true)},
 	})
 	if err != nil {
@@ -104,6 +104,11 @@ They all return the document. By default the answer comes right away with the st
 (15 s by default, up to 30 s with `WaitTimeoutSeconds`) and returns `authorized`, `rejected` or
 `failed`; if the SRI takes longer, it returns `processing` or `pending_sri` and the document
 carries on.
+
+In invoices, debit notes, purchase settlements and the supporting documents of a withholding,
+the last payment may leave out `Amount`: Flashpi gives it what the other payments leave of the
+total (all of it when it is the only one). With several payments none can be zero
+(`zero_payment`).
 
 ## Documents
 

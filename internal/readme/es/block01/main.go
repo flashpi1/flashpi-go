@@ -35,7 +35,7 @@ func main() {
 			UnitPrice:   "1.00",
 			Taxes:       []flashpi.DocumentTax{{Type: flashpi.TaxTypeVAT, Rate: "15"}},
 		}},
-		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: "1.15"}},
+		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: new("1.15")}},
 		Options:  &flashpi.DocumentOptions{WaitForAuthorization: new(true)},
 	})
 	if err != nil {
