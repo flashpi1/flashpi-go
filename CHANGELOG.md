@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/flashpi1/flashpi-go/compare/v0.1.0...v0.2.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **types:** DocumentPayment.Amount and WithholdingPayment.Amount are now *string. Write Amount: new("1.15") instead of Amount: "1.15"; leave it nil on the last payment to let Flashpi fill in the rest of the total.
+
+### Features
+
+* **types:** let the last payment leave out its amount ([791170f](https://github.com/flashpi1/flashpi-go/commit/791170ff735d3408d0e983f7fa73a7b95ac5db25))
+
 ## 0.1.0 (2026-11-14)
 
 
