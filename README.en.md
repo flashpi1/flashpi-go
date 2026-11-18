@@ -105,6 +105,11 @@ They all return the document. By default the answer comes right away with the st
 `failed`; if the SRI takes longer, it returns `processing` or `pending_sri` and the document
 carries on.
 
+In invoices, debit notes, purchase settlements and the supporting documents of a withholding,
+the last payment may leave out `Amount`: Flashpi gives it what the other payments leave of the
+total (all of it when it is the only one). With several payments none can be zero
+(`zero_payment`).
+
 ## Documents
 
 ```go
