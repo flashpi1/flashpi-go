@@ -1033,15 +1033,18 @@ type DocumentParty struct {
 	Email *string `json:"email,omitempty"`
 }
 
-// DocumentPayment: A payment. The payments must add up to the document total.
+// DocumentPayment: A payment. The payments must add up to the document total; the last one may
+// leave out `amount` to take the rest of the total.
 type DocumentPayment struct {
 	// Payment method: `cash` (without the financial system), `debt_offset`, `debit_card`,
 	// `electronic_money`, `prepaid_card`, `credit_card`, `other_financial_system` (bank transfers,
 	// checks and other payments through the financial system) or `securities_endorsement`.
 	Method PaymentMethod `json:"method"`
 
-	// Amount paid with this method.
-	Amount string `json:"amount"`
+	// Amount paid with this method. Only the last payment may leave it out: Flashpi gives it what
+	// the other payments leave of the total (the whole total when it is the only one). With several
+	// payments none can be zero (`zero_payment`), the computed one included.
+	Amount *string `json:"amount,omitempty"`
 
 	// Payment term in `termUnit` units. Required on purchase settlements.
 	Term *string `json:"term,omitempty"`
@@ -1567,6 +1570,7 @@ const (
 	FieldErrorCodeTooManyAdditionalFields        FieldErrorCode = "too_many_additional_fields"
 	FieldErrorCodeReservedName                   FieldErrorCode = "reserved_name"
 	FieldErrorCodeAmountMismatch                 FieldErrorCode = "amount_mismatch"
+	FieldErrorCodeZeroPayment                    FieldErrorCode = "zero_payment"
 	FieldErrorCodeFutureDate                     FieldErrorCode = "future_date"
 	FieldErrorCodeDateTooEarly                   FieldErrorCode = "date_too_early"
 	FieldErrorCodeDateTooLate                    FieldErrorCode = "date_too_late"
@@ -2163,7 +2167,8 @@ type RotateWebhookEndpointSecret struct {
 type SendDocumentEmail struct {
 }
 
-// Status: Public status of Flashpi. Placeholder until the status monitors exist.
+// Status: Public status of the Flashpi API. Components and SRI notices are on the status page,
+// https://flashpi.com.ec/status.
 type Status struct {
 	// Overall status of Flashpi.
 	Status StatusStatus `json:"status"`
@@ -2860,8 +2865,9 @@ type WithholdingPayment struct {
 	// Payment method (same values as `DocumentPayment.method`).
 	Method PaymentMethod `json:"method"`
 
-	// Amount.
-	Amount string `json:"amount"`
+	// Amount. Only the last payment may leave it out: it takes what the other payments leave of the
+	// supporting document `total`. With several payments none can be zero (`zero_payment`).
+	Amount *string `json:"amount,omitempty"`
 }
 
 // WithholdingTax is a value of the API. Tax withheld: `income_tax`, `vat` or `isd`. The API may add

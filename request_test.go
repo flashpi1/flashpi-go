@@ -25,7 +25,7 @@ var invoiceBody = CreateInvoice{
 		UnitPrice:   "1.00",
 		Taxes:       []DocumentTax{{Type: TaxTypeVAT, Rate: "15"}},
 	}},
-	Payments: []DocumentPayment{{Method: PaymentMethodCash, Amount: "1.15"}},
+	Payments: []DocumentPayment{{Method: PaymentMethodCash, Amount: ptr("1.15")}},
 }
 
 func TestTheHeadersOfARequest(t *testing.T) {

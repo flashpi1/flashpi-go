@@ -50,7 +50,7 @@ func sampleInvoice(issuerID string) flashpi.CreateInvoice {
 			UnitPrice:   "1.00",
 			Taxes:       []flashpi.DocumentTax{{Type: flashpi.TaxTypeVAT, Rate: "15"}},
 		}},
-		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: "1.15"}},
+		Payments: []flashpi.DocumentPayment{{Method: flashpi.PaymentMethodCash, Amount: new("1.15")}},
 		Options:  &flashpi.DocumentOptions{WaitForAuthorization: new(true), WaitTimeoutSeconds: new(30), SendEmail: new(false)},
 	}
 }
