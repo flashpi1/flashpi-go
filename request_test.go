@@ -132,6 +132,25 @@ func TestTheJSONBody(t *testing.T) {
 	}
 }
 
+func TestTheLastPaymentMayLeaveOutItsAmount(t *testing.T) {
+	client, transport, _ := testClient(t, respond(202, documentJSON("doc-1")))
+	body := invoiceBody
+	body.Payments = []DocumentPayment{
+		{Method: PaymentMethodCreditCard, Amount: ptr("1.00")},
+		{Method: PaymentMethodCash}, // Flashpi gives it what is left of the total
+	}
+	if _, err := client.Invoices.Create(context.Background(), body); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(transport.only(t).Body); !strings.Contains(got, `"payments":[{"method":"credit_card","amount":"1.00"},{"method":"cash"}]`) {
+		t.Errorf("body = %s", got)
+	}
+	data, err := json.Marshal([]WithholdingPayment{{Method: PaymentMethodOtherFinancialSystem}})
+	if err != nil || string(data) != `[{"method":"other_financial_system"}]` {
+		t.Errorf("got %s %v", data, err)
+	}
+}
+
 func TestIdsArePercentEncoded(t *testing.T) {
 	client, transport, _ := testClient(t, respond(200, documentJSON("x")), respond(200, documentJSON("x")))
 	ctx := context.Background()
