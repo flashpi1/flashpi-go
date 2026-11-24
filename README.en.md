@@ -199,17 +199,17 @@ case err != nil:
 }
 ```
 
-| Type                       | Status | Examples of `Code`                                          |
-| -------------------------- | ------ | ----------------------------------------------------------- |
-| `BadRequestError`          | 400    | `malformed_json`, `invalid_idempotency_key`                 |
-| `AuthenticationError`      | 401    | `authentication_required`, `invalid_api_key`                |
-| `PermissionDeniedError`    | 403    | `key_read_only`, `key_scope_mismatch`, `ip_not_allowed`     |
-| `NotFoundError`            | 404    | `not_found`                                                 |
-| `ConflictError`            | 409    | `sequential_already_used`, `ride_not_available`             |
-| `UnprocessableEntityError` | 422    | `validation_failed`, `total_mismatch`                       |
-| `RateLimitError`           | 429    | `demo_issuer_quota_exceeded`, `account_email_limit_reached` |
-| `InternalServerError`      | 5xx    | `internal_error`                                            |
-| `ConnectionError`          | —      | no answer (network); `TimeoutError` when time ran out       |
+| Type                       | Status | Examples of `Code`                                                                |
+| -------------------------- | ------ | --------------------------------------------------------------------------------- |
+| `BadRequestError`          | 400    | `malformed_json`, `invalid_idempotency_key`                                       |
+| `AuthenticationError`      | 401    | `authentication_required`, `invalid_api_key`                                      |
+| `PermissionDeniedError`    | 403    | `key_read_only`, `key_scope_mismatch`, `ip_not_allowed`, `live_key_required`      |
+| `NotFoundError`            | 404    | `not_found`                                                                       |
+| `ConflictError`            | 409    | `sequential_already_used`, `ride_not_available`, `webhook_endpoint_limit_reached` |
+| `UnprocessableEntityError` | 422    | `validation_failed`, `total_mismatch`                                             |
+| `RateLimitError`           | 429    | `demo_issuer_quota_exceeded`, `account_email_limit_reached`                       |
+| `InternalServerError`      | 5xx    | `internal_error`                                                                  |
+| `ConnectionError`          | —      | no answer (network); `TimeoutError` when time ran out                             |
 
 Every one of them can also be read as a `*flashpi.Error` with `errors.As`. Some errors carry
 extra data in `apiErr.Problem`, such as `DocumentID`, `Limit`, `ResetsAt` or `RIDEStatus`. For
@@ -404,8 +404,15 @@ it.
 
 To **renew an issuer's signature** for test and live mode at once, run the same flow with the
 new .p12: Flashpi recognizes the RUC (`ExistingIssuer`) and `Complete` with no data adds the
-certificate. `client.Issuers.Certificates.Upload(ctx, issuerID, flashpi.CertificateUpload{...})`,
-instead, uploads a certificate for the mode of the key you use only (test or live).
+certificate. When the issuer already has live documents, use a live key (`fp_live_`): with a test
+key the API answers 403 `live_key_required`, as it does when you change the issuer, its
+establishments or its emission points.
+`client.Issuers.Certificates.Upload(ctx, issuerID, flashpi.CertificateUpload{...})`, instead,
+uploads a certificate for the mode of the key you use only (test or live).
+
+An accepted certificate may carry `Warnings`: `ruc_mismatch`
+(`flashpi.CertificateWarningCodeRUCMismatch`) marks a test certificate that is not for the
+issuer's RUC, which signs test documents only and does not count for live API keys.
 
 ## Optional fields and null
 
