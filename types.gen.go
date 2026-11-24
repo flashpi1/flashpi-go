@@ -144,6 +144,10 @@ type Certificate struct {
 
 	Rejection *CertificateRejection `json:"rejection"`
 
+	// Warnings about an accepted certificate (empty when there are none). A test certificate that
+	// is not for the issuer's RUC is accepted with `ruc_mismatch`.
+	Warnings []CertificateWarning `json:"warnings"`
+
 	// Format: date-time.
 	CreatedAt time.Time `json:"createdAt"`
 
@@ -266,6 +270,27 @@ const (
 	CertificateStatusRejected   CertificateStatus = "rejected"
 )
 
+// CertificateWarning: Something to fix about an accepted certificate that does not stop it signing.
+type CertificateWarning struct {
+	// `ruc_mismatch`: a test certificate that is not for the issuer's RUC. It signs test documents
+	// only and does not count for live API keys; in live mode such a certificate is rejected
+	// (`rejection.code` `ruc_mismatch`).
+	Code CertificateWarningCode `json:"code"`
+
+	Message string `json:"message"`
+}
+
+// CertificateWarningCode is a value of the API. `ruc_mismatch`: a test certificate that is not for
+// the issuer's RUC. It signs test documents only and does not count for live API keys; in live mode
+// such a certificate is rejected (`rejection.code` `ruc_mismatch`). The API may add values: keep a
+// default case.
+type CertificateWarningCode string
+
+// The values of CertificateWarningCode.
+const (
+	CertificateWarningCodeRUCMismatch CertificateWarningCode = "ruc_mismatch"
+)
+
 // CompleteIssuerOnboarding: The issuer to create, with the same fields as POST /v1/issuers
 // (legalName, headOfficeAddress and taxProfile are required for a new issuer). For a renewal
 // (`existingIssuer`) the body may be `{}`: the issuer is not changed (PATCH it if needed).
@@ -322,7 +347,9 @@ type CreateCreditNote struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -367,7 +394,9 @@ type CreateDebitNote struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -427,7 +456,9 @@ type CreateInvoice struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -501,7 +532,9 @@ type CreatePurchaseSettlement struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -542,7 +575,9 @@ type CreateWaybill struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -607,7 +642,9 @@ type CreateWithholding struct {
 
 	// Additional information printed on the document (name → value, 1 to 300 characters each). A
 	// document carries at most 15 fields including the legends Flashpi adds (RUC Proveedor, and
-	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours.
+	// Gran Contribuyente for large taxpayers), so at most 13 or 14 of yours. Not accepted with the
+	// shared demo issuer (422 demo_issuer_free_text_not_allowed), whose documents carry only the
+	// legend "Aviso: DOCUMENTO DE PRUEBA SIN VALIDEZ TRIBUTARIA - SANDBOX FLASHPI".
 	AdditionalInfo map[string]string `json:"additionalInfo,omitempty"`
 
 	// Delivery options.
@@ -629,7 +666,8 @@ type CreateWithholding struct {
 
 // DebitNoteReason: A reason for a debit note and its amount before taxes.
 type DebitNoteReason struct {
-	// Reason.
+	// Reason. With the shared demo issuer at most 291 characters (422
+	// demo_issuer_description_too_long): Flashpi starts it with "PRUEBA - ".
 	Description string `json:"description"`
 
 	// Amount before taxes.
@@ -879,19 +917,21 @@ type DocumentFailureCode string
 
 // The values of DocumentFailureCode.
 const (
-	DocumentFailureCodeCertificateRequired     DocumentFailureCode = "certificate_required"
-	DocumentFailureCodeCertificateExpired      DocumentFailureCode = "certificate_expired"
-	DocumentFailureCodeCertificateNotYetValid  DocumentFailureCode = "certificate_not_yet_valid"
-	DocumentFailureCodeCertificateBlocked      DocumentFailureCode = "certificate_blocked"
-	DocumentFailureCodeCertificateRevoked      DocumentFailureCode = "certificate_revoked"
-	DocumentFailureCodeCertificateUnusable     DocumentFailureCode = "certificate_unusable"
-	DocumentFailureCodeDocumentTooLarge        DocumentFailureCode = "document_too_large"
-	DocumentFailureCodeDocumentInvalid         DocumentFailureCode = "document_invalid"
-	DocumentFailureCodeSigningFailed           DocumentFailureCode = "signing_failed"
-	DocumentFailureCodeSRIUnavailable          DocumentFailureCode = "sri_unavailable"
-	DocumentFailureCodeSRIAuthorizationTimeout DocumentFailureCode = "sri_authorization_timeout"
-	DocumentFailureCodeSRIRequestRefused       DocumentFailureCode = "sri_request_refused"
-	DocumentFailureCodeSRIEnvironmentMismatch  DocumentFailureCode = "sri_environment_mismatch"
+	DocumentFailureCodeCertificateRequired      DocumentFailureCode = "certificate_required"
+	DocumentFailureCodeCertificateExpired       DocumentFailureCode = "certificate_expired"
+	DocumentFailureCodeCertificateNotYetValid   DocumentFailureCode = "certificate_not_yet_valid"
+	DocumentFailureCodeCertificateBlocked       DocumentFailureCode = "certificate_blocked"
+	DocumentFailureCodeCertificateRevoked       DocumentFailureCode = "certificate_revoked"
+	DocumentFailureCodeCertificateUnusable      DocumentFailureCode = "certificate_unusable"
+	DocumentFailureCodeCertificateRUCMismatch   DocumentFailureCode = "certificate_ruc_mismatch"
+	DocumentFailureCodeDocumentTooLarge         DocumentFailureCode = "document_too_large"
+	DocumentFailureCodeDocumentInvalid          DocumentFailureCode = "document_invalid"
+	DocumentFailureCodeSigningFailed            DocumentFailureCode = "signing_failed"
+	DocumentFailureCodeSRIUnavailable           DocumentFailureCode = "sri_unavailable"
+	DocumentFailureCodeSRIAuthorizationTimeout  DocumentFailureCode = "sri_authorization_timeout"
+	DocumentFailureCodeSRIRequestRefused        DocumentFailureCode = "sri_request_refused"
+	DocumentFailureCodeSRIEnvironmentMismatch   DocumentFailureCode = "sri_environment_mismatch"
+	DocumentFailureCodeSRIAuthorizationMismatch DocumentFailureCode = "sri_authorization_mismatch"
 )
 
 // DocumentItem: A line of an invoice, credit note or purchase settlement. Flashpi computes its
@@ -903,7 +943,8 @@ type DocumentItem struct {
 	// A second code, for example the barcode.
 	AuxiliaryCode *string `json:"auxiliaryCode,omitempty"`
 
-	// Description.
+	// Description. With the shared demo issuer at most 291 characters (422
+	// demo_issuer_description_too_long): Flashpi starts it with "PRUEBA - ".
 	Description string `json:"description"`
 
 	// Unit of measure (invoices and purchase settlements).
@@ -921,7 +962,8 @@ type DocumentItem struct {
 	// The taxes of the line.
 	Taxes []DocumentTax `json:"taxes"`
 
-	// Up to 3 extra details printed with the line (name → value, 1 to 300 characters).
+	// Up to 3 extra details printed with the line (name → value, 1 to 300 characters). Not
+	// accepted with the shared demo issuer (422 demo_issuer_free_text_not_allowed).
 	AdditionalDetails map[string]string `json:"additionalDetails,omitempty"`
 }
 
@@ -1307,6 +1349,7 @@ const (
 	ErrorCodeKeyScopeMismatch               ErrorCode = "key_scope_mismatch"
 	ErrorCodeKeyReadOnly                    ErrorCode = "key_read_only"
 	ErrorCodeIPNotAllowed                   ErrorCode = "ip_not_allowed"
+	ErrorCodeLiveKeyRequired                ErrorCode = "live_key_required"
 	ErrorCodeInvalidIdempotencyKey          ErrorCode = "invalid_idempotency_key"
 	ErrorCodeIdempotencyKeyReused           ErrorCode = "idempotency_key_reused"
 	ErrorCodeIdempotencyKeyInProgress       ErrorCode = "idempotency_key_in_progress"
@@ -1336,6 +1379,7 @@ const (
 	ErrorCodeWebhookEndpointAlreadyVerified ErrorCode = "webhook_endpoint_already_verified"
 	ErrorCodeWebhookEndpointNotVerified     ErrorCode = "webhook_endpoint_not_verified"
 	ErrorCodeWebhookDeliveryInProgress      ErrorCode = "webhook_delivery_in_progress"
+	ErrorCodeWebhookEndpointLimitReached    ErrorCode = "webhook_endpoint_limit_reached"
 	ErrorCodeSandboxNotEnabled              ErrorCode = "sandbox_not_enabled"
 	ErrorCodeDemoIssuerQuotaExceeded        ErrorCode = "demo_issuer_quota_exceeded"
 	ErrorCodeDemoIssuerUnavailable          ErrorCode = "demo_issuer_unavailable"
@@ -1583,7 +1627,10 @@ const (
 	FieldErrorCodeURLNotAllowed                  FieldErrorCode = "url_not_allowed"
 	FieldErrorCodeDemoIssuerTestOnly             FieldErrorCode = "demo_issuer_test_only"
 	FieldErrorCodeDemoIssuerSequentialNotAllowed FieldErrorCode = "demo_issuer_sequential_not_allowed"
+	FieldErrorCodeDemoIssuerFreeTextNotAllowed   FieldErrorCode = "demo_issuer_free_text_not_allowed"
+	FieldErrorCodeDemoIssuerDescriptionTooLong   FieldErrorCode = "demo_issuer_description_too_long"
 	FieldErrorCodeRUCMismatch                    FieldErrorCode = "ruc_mismatch"
+	FieldErrorCodeCertificateRUCMissing          FieldErrorCode = "certificate_ruc_missing"
 )
 
 // IDType is a value of the API. One of the constants below. The API may add values: keep a default
@@ -2067,7 +2114,8 @@ type ProblemDetails struct {
 	DocumentID *string `json:"documentId,omitempty"`
 
 	// The daily limit that was reached (`email_resend_limit_reached`,
-	// `account_email_limit_reached`, `demo_issuer_quota_exceeded`).
+	// `account_email_limit_reached`, `demo_issuer_quota_exceeded`), or the most webhook endpoints
+	// an account may have in a mode (`webhook_endpoint_limit_reached`).
 	Limit *int `json:"limit,omitempty"`
 
 	// When the daily limit resets: the next midnight in Ecuador (the three codes above and
@@ -2369,13 +2417,15 @@ type WaybillItem struct {
 	// A second code.
 	AuxiliaryCode *string `json:"auxiliaryCode,omitempty"`
 
-	// Description.
+	// Description. With the shared demo issuer at most 291 characters (422
+	// demo_issuer_description_too_long): Flashpi starts it with "PRUEBA - ".
 	Description string `json:"description"`
 
 	// Quantity, up to 6 decimals.
 	Quantity string `json:"quantity"`
 
-	// Up to 3 extra details (name → value).
+	// Up to 3 extra details (name → value). Not accepted with the shared demo issuer (422
+	// demo_issuer_free_text_not_allowed).
 	AdditionalDetails map[string]string `json:"additionalDetails,omitempty"`
 }
 
