@@ -65,6 +65,32 @@ func TestAnAPIErrorFromProblemDetails(t *testing.T) {
 	}
 }
 
+func TestTheCodesOfTheAPIAreRecognized(t *testing.T) {
+	denied := mustAs[*PermissionDeniedError](t, newAPIError(403, http.Header{},
+		[]byte(`{"status":403,"code":"live_key_required","detail":"The issuer has live documents: use a live key."}`)))
+	if denied.Code != ErrorCodeLiveKeyRequired {
+		t.Errorf("Code = %q", denied.Code)
+	}
+	conflict := mustAs[*ConflictError](t, newAPIError(409, http.Header{},
+		[]byte(`{"status":409,"code":"webhook_endpoint_limit_reached","detail":"Delete an endpoint first.","limit":20}`)))
+	if conflict.Code != ErrorCodeWebhookEndpointLimitReached || conflict.Problem == nil || conflict.Problem.Limit == nil || *conflict.Problem.Limit != 20 {
+		t.Errorf("got %q %+v", conflict.Code, conflict.Problem)
+	}
+	invalid := mustAs[*UnprocessableEntityError](t, newAPIError(422, http.Header{}, []byte(`{"status":422,"code":"validation_failed","errors":[
+		{"field":"file","code":"certificate_ruc_missing","message":"m"},
+		{"field":"additionalInfo","code":"demo_issuer_free_text_not_allowed","message":"m"},
+		{"field":"items[0].description","code":"demo_issuer_description_too_long","message":"m"}]}`)))
+	want := []FieldErrorCode{FieldErrorCodeCertificateRUCMissing, FieldErrorCodeDemoIssuerFreeTextNotAllowed, FieldErrorCodeDemoIssuerDescriptionTooLong}
+	if len(invalid.Errors) != len(want) {
+		t.Fatalf("Errors = %+v", invalid.Errors)
+	}
+	for index, field := range invalid.Errors {
+		if field.Code != want[index] {
+			t.Errorf("Errors[%d].Code = %q, want %q", index, field.Code, want[index])
+		}
+	}
+}
+
 func TestAnAPIErrorWithoutProblemDetails(t *testing.T) {
 	cases := []struct {
 		body, message string
