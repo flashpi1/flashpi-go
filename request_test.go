@@ -434,6 +434,30 @@ func TestRetryAfter(t *testing.T) {
 	}
 }
 
+func TestTheLimitsOfTheWebhookEndpointsAreNotRetried(t *testing.T) {
+	ctx := context.Background()
+	client, transport, _ := testClient(t, problem(409, "webhook_endpoint_limit_reached"))
+	_, err := client.WebhookEndpoints.Create(ctx, CreateWebhookEndpoint{URL: "https://a.test/hook", EnabledEvents: []EnabledEvent{EnabledEventAll}})
+	if conflict := mustAs[*ConflictError](t, err); conflict.Code != ErrorCodeWebhookEndpointLimitReached || len(transport.all()) != 1 {
+		t.Errorf("got %q after %d requests", conflict.Code, len(transport.all()))
+	}
+	// The verifications of the hour ran out: Retry-After says when the hour ends.
+	calls := map[string]func(*Client) error{
+		"Verify": func(c *Client) error { _, err := c.WebhookEndpoints.Verify(ctx, "w1"); return err },
+		"Update": func(c *Client) error {
+			_, err := c.WebhookEndpoints.Update(ctx, "w1", UpdateWebhookEndpoint{URL: ptr("https://b.test/hook")})
+			return err
+		},
+	}
+	for name, call := range calls {
+		client, transport, _ := testClient(t, problem(429, "rate_limited", "Retry-After", "1800"))
+		rate := mustAs[*RateLimitError](t, call(client))
+		if wait, ok := rate.RetryAfter(); !ok || wait != 30*time.Minute || len(transport.all()) != 1 {
+			t.Errorf("%s: RetryAfter() = %v %v after %d requests", name, wait, ok, len(transport.all()))
+		}
+	}
+}
+
 func TestAnInProgressAttemptIsWaitedForOnlyWhenItsAnswerWasLost(t *testing.T) {
 	// The first attempt timed out: the 409 is this call's own attempt, still running.
 	client, transport, clock := testClient(t,
