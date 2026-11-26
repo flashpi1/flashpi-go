@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go (the oldest supported release)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26.x'
           cache-dependency-path: internal/tools/go.sum
@@ -88,7 +88,7 @@ jobs:
           persist-credentials: false
       # No cache: the module has no dependencies, and the "Lint, vet and test" job keeps the
       # cache of the same Go release, with staticcheck's modules in it.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '${{ matrix.go }}.x'
           cache: false
