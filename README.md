@@ -197,17 +197,17 @@ case err != nil:
 }
 ```
 
-| Tipo                       | Estado | Ejemplos de `Code`                                          |
-| -------------------------- | ------ | ----------------------------------------------------------- |
-| `BadRequestError`          | 400    | `malformed_json`, `invalid_idempotency_key`                 |
-| `AuthenticationError`      | 401    | `authentication_required`, `invalid_api_key`                |
-| `PermissionDeniedError`    | 403    | `key_read_only`, `key_scope_mismatch`, `ip_not_allowed`     |
-| `NotFoundError`            | 404    | `not_found`                                                 |
-| `ConflictError`            | 409    | `sequential_already_used`, `ride_not_available`             |
-| `UnprocessableEntityError` | 422    | `validation_failed`, `total_mismatch`                       |
-| `RateLimitError`           | 429    | `demo_issuer_quota_exceeded`, `account_email_limit_reached` |
-| `InternalServerError`      | 5xx    | `internal_error`                                            |
-| `ConnectionError`          | —      | sin respuesta (red); `TimeoutError` si se agotó el plazo    |
+| Tipo                       | Estado | Ejemplos de `Code`                                                                |
+| -------------------------- | ------ | --------------------------------------------------------------------------------- |
+| `BadRequestError`          | 400    | `malformed_json`, `invalid_idempotency_key`                                       |
+| `AuthenticationError`      | 401    | `authentication_required`, `invalid_api_key`                                      |
+| `PermissionDeniedError`    | 403    | `key_read_only`, `key_scope_mismatch`, `ip_not_allowed`, `live_key_required`      |
+| `NotFoundError`            | 404    | `not_found`                                                                       |
+| `ConflictError`            | 409    | `sequential_already_used`, `ride_not_available`, `webhook_endpoint_limit_reached` |
+| `UnprocessableEntityError` | 422    | `validation_failed`, `total_mismatch`                                             |
+| `RateLimitError`           | 429    | `demo_issuer_quota_exceeded`, `account_email_limit_reached`                       |
+| `InternalServerError`      | 5xx    | `internal_error`                                                                  |
+| `ConnectionError`          | —      | sin respuesta (red); `TimeoutError` si se agotó el plazo                          |
 
 Todos se leen también como `*flashpi.Error` con `errors.As`. Algunos errores traen datos extra en
 `apiErr.Problem`, por ejemplo `DocumentID`, `Limit`, `ResetsAt` o `RIDEStatus`. Para recibir los
@@ -402,9 +402,15 @@ de hasta 1 MiB. El SDK lo lee una vez, antes de enviar nada, y no lo cierra.
 
 Para **renovar la firma** de un emisor, para pruebas y producción a la vez, repite el mismo
 flujo con el .p12 nuevo: Flashpi reconoce el RUC (`ExistingIssuer`) y `Complete` sin datos
-agrega el certificado. En cambio,
+agrega el certificado. Si el emisor ya tiene documentos de producción, usa una clave de producción
+(`fp_live_`): con una de pruebas la API responde 403 `live_key_required`, igual que al cambiar el
+emisor, sus establecimientos o sus puntos de emisión. En cambio,
 `client.Issuers.Certificates.Upload(ctx, issuerID, flashpi.CertificateUpload{...})` sube un
 certificado solo para el modo de la clave que usas (pruebas o producción).
+
+Un certificado aceptado puede traer avisos en `Warnings`: `ruc_mismatch`
+(`flashpi.CertificateWarningCodeRUCMismatch`) marca un certificado de pruebas que no es del RUC
+del emisor, que firma solo documentos de prueba y no sirve para las claves de producción.
 
 ## Campos opcionales y null
 

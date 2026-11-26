@@ -1,6 +1,7 @@
 package flashpi
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"testing"
@@ -82,6 +83,56 @@ func TestADocumentFromTheAPI(t *testing.T) {
 	}
 	if !document.CreatedAt.Equal(time.Date(2026, 11, 13, 12, 0, 0, 123_000_000, time.UTC)) {
 		t.Errorf("CreatedAt = %v", document.CreatedAt)
+	}
+}
+
+func TestTheFailureCodesOfADocument(t *testing.T) {
+	cases := map[string]DocumentFailureCode{
+		"certificate_ruc_mismatch":   DocumentFailureCodeCertificateRUCMismatch,
+		"sri_authorization_mismatch": DocumentFailureCodeSRIAuthorizationMismatch,
+	}
+	for code, want := range cases {
+		var document Document
+		body := `{"id":"d1","status":"failed","failure":{"code":"` + code + `","message":"Failed."}}`
+		if err := json.Unmarshal([]byte(body), &document); err != nil {
+			t.Fatal(err)
+		}
+		if document.Status != DocumentStatusFailed || document.Failure == nil || document.Failure.Code != want {
+			t.Errorf("%s: got %+v", code, document.Failure)
+		}
+	}
+}
+
+func TestACertificateWithWarnings(t *testing.T) {
+	client, transport, _ := testClient(t,
+		respond(200, `{"id":"c1","issuerId":"i1","environment":"test","allModes":false,"status":"accepted","usable":true,
+			"ruc":"1790016919001","revocation":null,"rejection":null,
+			"warnings":[{"code":"ruc_mismatch","message":"This certificate is not for the issuer's RUC."},{"code":"x_new","message":"New."}],
+			"createdAt":"2026-11-24T12:00:00Z","updatedAt":"2026-11-24T12:00:00Z"}`),
+		respond(200, `{"id":"c2","issuerId":"i1","environment":"live","allModes":true,"status":"accepted","usable":true,
+			"revocation":null,"rejection":null,"warnings":[],"createdAt":"2026-11-24T12:00:00Z","updatedAt":"2026-11-24T12:00:00Z"}`),
+	)
+	ctx := context.Background()
+	certificate, err := client.Issuers.Certificates.Get(ctx, "i1", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(certificate.Warnings) != 2 {
+		t.Fatalf("Warnings = %+v", certificate.Warnings)
+	}
+	if warning := certificate.Warnings[0]; warning.Code != CertificateWarningCodeRUCMismatch || warning.Message != "This certificate is not for the issuer's RUC." {
+		t.Errorf("Warnings[0] = %+v", warning)
+	}
+	// A code this version does not know is kept as it came.
+	if certificate.Warnings[1].Code != "x_new" {
+		t.Errorf("Warnings[1] = %+v", certificate.Warnings[1])
+	}
+	certificate, err = client.Issuers.Certificates.Get(ctx, "i1", "c2")
+	if err != nil || certificate.Warnings == nil || len(certificate.Warnings) != 0 {
+		t.Errorf("got %+v %v", certificate, err)
+	}
+	if got := transport.all()[1].URL; got != testBaseURL+"/v1/issuers/i1/certificates/c2" {
+		t.Errorf("URL = %s", got)
 	}
 }
 

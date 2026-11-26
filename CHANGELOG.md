@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/flashpi1/flashpi-go/compare/v0.2.0...v0.2.1) (2026-11-25)
+
+
+### Bug fixes
+
+* **types:** add certificate warnings and the API's new codes ([a3b6f0e](https://github.com/flashpi1/flashpi-go/commit/a3b6f0e04c71422c205b8add7b847dd5cbbe5903))
+
 ## [0.2.0](https://github.com/flashpi1/flashpi-go/compare/v0.1.0...v0.2.0) (2026-11-18)
 
 
